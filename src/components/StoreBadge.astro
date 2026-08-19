@@ -1,44 +1,56 @@
 ---
 /*
   Official store artwork, self-hosted. The three assets do not share a geometry:
-  Google's and F-Droid's PNGs carry the mandated clear space inside the image
-  (content is 67.2% of the frame height, measured), while Apple's SVG is the
-  button and nothing else. Sizing them all to the same *frame* height would make
-  Apple's look a third too big, so each is scaled to a common *content* height.
+  Google's and F-Droid's PNGs carry the mandated clear space *inside* the image
+  — a 41px border on all four sides of a 646x250 frame, so the button is 67.2%
+  of the frame's height — while Apple's SVG is the button and nothing else.
+  Sizing them all to the same *frame* would make Apple's look a third too big
+  and, stacked in a column, would indent the two PNGs past it. So each is scaled
+  to a common button height and the baked-in clear space is pulled back out; the
+  flex gap around them supplies it again, uniformly.
+
+  The bleed sits on the link, not on the image: negative margins on the image
+  shrink the shrink-to-fit width of its own containing block, which preflight's
+  `img { max-width: 100% }` then resolves against — clamping the width while the
+  set height stays put, and squashing the badge.
 */
 interface Props {
   store: 'play' | 'appstore' | 'fdroid';
   href: string;
-  /** Rendered height of the button itself, padding excluded. */
+  /** Rendered height of the button itself, clear space excluded. */
   height?: number;
 }
 const { store, href, height = 48 } = Astro.props;
 
-// Fraction of the PNG frame occupied by the button, from the alpha bounding box.
+// Fraction of the PNG frame's height occupied by the button, from the alpha
+// bounding box. The horizontal inset is the same 41px, so one bleed covers both
+// axes.
 const CLEAR_SPACE_RATIO = 0.672;
 
 const assets = {
   play: {
     src: '/badges/google-play.png',
     alt: 'Get it on Google Play',
+    ratio: 646 / 250,
     padded: true,
   },
   appstore: {
     src: '/badges/app-store.svg',
     alt: 'Download on the App Store',
+    ratio: 120 / 40,
     padded: false,
   },
   fdroid: {
     src: '/badges/fdroid.png',
     alt: 'Get it on F-Droid',
+    ratio: 646 / 250,
     padded: true,
   },
 } as const;
 
-const { src, alt, padded } = assets[store];
+const { src, alt, ratio, padded } = assets[store];
 const frameHeight = padded ? height / CLEAR_SPACE_RATIO : height;
-// Pull the clear space back in so badges sit on a shared baseline; the gap
-// between them in the flex row still honours it.
+const frameWidth = frameHeight * ratio;
 const bleed = (frameHeight - height) / 2;
 ---
 
@@ -47,12 +59,14 @@ const bleed = (frameHeight - height) / 2;
   target="_blank"
   rel="noopener"
   class="inline-block shrink-0 transition-transform duration-200 hover:scale-[1.03] motion-reduce:hover:scale-100"
+  style={bleed ? `margin:${-bleed}px` : undefined}
 >
   <img
     src={src}
     alt={alt}
-    height={frameHeight}
-    style={`height:${frameHeight}px;width:auto;margin-block:${-bleed}px`}
+    width={Math.round(frameWidth)}
+    height={Math.round(frameHeight)}
+    style={`display:block;width:${frameWidth}px;height:${frameHeight}px`}
     loading="lazy"
     decoding="async"
   />
