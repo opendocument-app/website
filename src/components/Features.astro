@@ -1,0 +1,91 @@
+---
+import Icon from './Icon.astro';
+
+const features = [
+  {
+    icon: 'search',
+    title: 'Search and highlight',
+    body: 'Find a keyword anywhere in the document and see every hit marked in place.',
+  },
+  {
+    icon: 'pencil',
+    title: 'Fix a typo on the go',
+    body: 'Basic editing for the last correction before you send it — no round trip to a desktop.',
+  },
+  {
+    icon: 'lock',
+    title: 'Password-protected files',
+    body: 'Encrypted documents open the same way, with the password never leaving the device.',
+  },
+  {
+    icon: 'wifiOff',
+    title: 'Works offline',
+    body: 'Everything is decoded on your device, so a tunnel or a plane changes nothing.',
+  },
+  {
+    icon: 'expand',
+    title: 'Distraction-free reading',
+    body: 'Full-screen mode for reading notes on the bus, with the interface out of the way.',
+  },
+  {
+    icon: 'speaker',
+    title: 'Read out loud',
+    body: 'Text-to-speech reads a document back to you, hands free.',
+  },
+  {
+    icon: 'copy',
+    title: 'Select and copy text',
+    body: 'Pull a paragraph out of a document and paste it wherever you need it.',
+  },
+  {
+    icon: 'printer',
+    title: 'Print',
+    body: 'Send a document straight to any printer your device can reach.',
+  },
+] as const;
+---
+
+<section id="features" class="py-20">
+  <div class="mx-auto max-w-6xl px-4 sm:px-6">
+    <div class="max-w-2xl">
+      <h2 class="text-3xl font-bold tracking-tight sm:text-4xl">
+        A reader, not a compromise
+      </h2>
+      <p class="mt-4 text-lg leading-relaxed text-on-surface-variant">
+        Complex formatting, embedded images, tables and charts survive the trip to
+        a small screen — and the parts you actually need on the move are one tap
+        away.
+      </p>
+    </div>
+
+    <ul class="mt-12 grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-4">
+      {
+        features.map((f) => (
+          <li>
+            <div class="mb-4 inline-flex rounded-xl bg-primary-container p-3 text-on-primary-container">
+              <Icon name={f.icon} class="h-5 w-5" />
+            </div>
+            <h3 class="font-semibold">{f.title}</h3>
+            <p class="mt-1.5 text-sm leading-relaxed text-on-surface-variant">{f.body}</p>
+          </li>
+        ))
+      }
+    </ul>
+
+    <div
+      class="mt-14 flex flex-col gap-4 rounded-2xl border border-outline-variant bg-surface-container/50 p-6 sm:flex-row sm:items-center sm:gap-6 sm:p-8"
+    >
+      <div class="inline-flex shrink-0 rounded-xl bg-brand-text/15 p-3 text-brand-text">
+        <Icon name="bolt" class="h-6 w-6" />
+      </div>
+      <div>
+        <h3 class="font-semibold">Opens from wherever your documents already are</h3>
+        <p class="mt-1.5 text-sm leading-relaxed text-on-surface-variant">
+          Tap an attachment in Gmail, Drive, iCloud, OneDrive, Nextcloud, Dropbox or
+          Box and it opens here. Or browse your device with the built-in file
+          explorer.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>

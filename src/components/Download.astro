@@ -1,0 +1,56 @@
+---
+import StoreBadge from './StoreBadge.astro';
+import Icon from './Icon.astro';
+import { primary, stores } from '../data/links';
+---
+
+<section id="download" class="border-t border-outline-variant/60 py-20">
+  <div class="mx-auto max-w-6xl px-4 sm:px-6">
+    <div
+      class="relative overflow-hidden rounded-3xl border border-outline-variant bg-surface-container/60 px-6 py-14 text-center sm:px-12"
+    >
+      <div
+        aria-hidden="true"
+        class="pointer-events-none absolute inset-x-0 top-0 h-64 bg-[radial-gradient(50%_70%_at_50%_0%,var(--md-primary-container)_0%,transparent_75%)] opacity-70"
+      >
+      </div>
+
+      <div class="relative">
+        <h2 class="text-3xl font-bold tracking-tight sm:text-4xl">Get OpenDocument Reader</h2>
+        <p class="mx-auto mt-4 max-w-xl text-lg leading-relaxed text-on-surface-variant">
+          Free on Android and iOS, and on F-Droid for a build with no proprietary
+          dependencies at all.
+        </p>
+
+        <div class="mt-9 flex flex-wrap items-center justify-center gap-x-6 gap-y-4">
+          <StoreBadge store="play" href={primary.android} />
+          <StoreBadge store="appstore" href={primary.ios} />
+          <StoreBadge store="fdroid" href={primary.fdroid} />
+        </div>
+
+        <div
+          class="mx-auto mt-10 flex max-w-lg flex-col items-center gap-3 rounded-2xl border border-outline-variant bg-surface p-5 sm:flex-row sm:text-left"
+        >
+          <Icon name="heart" class="h-5 w-5 shrink-0 text-primary" />
+          <p class="text-sm leading-relaxed text-on-surface-variant">
+            Prefer it without ads? <span class="font-medium text-on-surface">Pro</span> is the same app,
+            paid once:{' '}
+            <a
+              href={stores.android.paid}
+              target="_blank"
+              rel="noopener"
+              class="font-medium text-primary underline-offset-4 hover:underline">Google Play</a
+            >
+            ·
+            <a
+              href={stores.ios.paid}
+              target="_blank"
+              rel="noopener"
+              class="font-medium text-primary underline-offset-4 hover:underline">App Store</a
+            >
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

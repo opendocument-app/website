@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.astro/
+
+# Vendored from node_modules by `scripts/sync-odr.mjs`; npm is the source of
+# truth for the version, so the copy is never committed.
+public/odr/
+
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+.firebase/

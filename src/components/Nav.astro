@@ -1,0 +1,61 @@
+---
+import Logo from './Logo.astro';
+import Icon from './Icon.astro';
+import { primary, repos } from '../data/links';
+
+const sections = [
+  { href: '/#try', label: 'Try it' },
+  { href: '/#features', label: 'Features' },
+  { href: '/#formats', label: 'Formats' },
+  { href: '/#developers', label: 'Developers' },
+];
+---
+
+<header
+  class="sticky top-0 z-40 border-b border-outline-variant/60 bg-surface/85 backdrop-blur-md supports-[backdrop-filter]:bg-surface/70"
+>
+  <nav
+    class="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4 sm:px-6"
+    aria-label="Main"
+  >
+    <a href="/#top" class="flex items-center gap-2.5 font-semibold tracking-tight">
+      <Logo class="h-8 w-8" title="OpenDocument Reader" />
+      <span class="hidden sm:inline">OpenDocument&nbsp;Reader</span>
+      <span class="sm:hidden">ODR</span>
+    </a>
+
+    <ul class="ml-auto hidden items-center gap-1 md:flex">
+      {
+        sections.map((s) => (
+          <li>
+            <a
+              href={s.href}
+              class="rounded-lg px-3 py-2 text-sm text-on-surface-variant transition-colors hover:bg-surface-container hover:text-on-surface"
+            >
+              {s.label}
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+
+    <a
+      href={repos.org}
+      target="_blank"
+      rel="noopener"
+      class="ml-auto rounded-lg p-2 text-on-surface-variant transition-colors hover:bg-surface-container hover:text-on-surface md:ml-1"
+      aria-label="OpenDocument Reader on GitHub"
+    >
+      <Icon name="github" class="h-5 w-5" />
+    </a>
+
+    <a
+      href={primary.android}
+      target="_blank"
+      rel="noopener"
+      class="rounded-full bg-primary px-4 py-2 text-sm font-medium text-on-primary transition-opacity hover:opacity-90"
+    >
+      Get the app
+    </a>
+  </nav>
+</header>

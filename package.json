@@ -1,0 +1,26 @@
+{
+  "name": "opendocument-website",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The opendocument.app website",
+  "scripts": {
+    "dev": "astro dev",
+    "predev": "node scripts/sync-odr.mjs",
+    "build": "astro build",
+    "prebuild": "node scripts/sync-odr.mjs",
+    "preview": "astro preview",
+    "check": "astro check"
+  },
+  "dependencies": {
+    "@astrojs/sitemap": "^3.7.3",
+    "@opendocument/odr-core": "^6.9.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "astro": "^7.2.3",
+    "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "typescript": "^6.0.3"
+  }
+}

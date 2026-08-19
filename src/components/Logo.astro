@@ -1,0 +1,45 @@
+---
+/*
+  The launcher icon redrawn as vector: three stacked pages, orange behind green
+  behind blue, the front one with a folded corner. Colours are sampled from
+  `ic_launcher-playstore.png` so the mark matches the one on the stores.
+*/
+interface Props {
+  class?: string;
+  title?: string;
+}
+const { class: className = 'h-9 w-9', title } = Astro.props;
+---
+
+<svg
+  viewBox="0 0 48 48"
+  class={className}
+  role={title ? 'img' : undefined}
+  aria-hidden={title ? undefined : 'true'}
+  aria-label={title}
+  fill="none"
+  xmlns="http://www.w3.org/2000/svg"
+>
+  <rect x="5" y="14" width="24" height="29" rx="2.5" fill="var(--brand-slide)" />
+  <rect x="10" y="10" width="25" height="30" rx="2.5" fill="var(--brand-sheet)" />
+  <path
+    d="M17.5 5h13.1L40 14.2v20.3A2.5 2.5 0 0 1 37.5 37h-20A2.5 2.5 0 0 1 15 34.5v-27A2.5 2.5 0 0 1 17.5 5Z"
+    fill="var(--brand-text)"
+  />
+  <path d="M27.5 5h3.1L40 14.2v20.3A2.5 2.5 0 0 1 37.5 37h-10V5Z" fill="#42a0d0" />
+  <path d="M30.6 5 40 14.2h-7a2.4 2.4 0 0 1-2.4-2.4V5Z" fill="#a9bac7" />
+  <g fill="#fff">
+    <rect x="19.5" y="24.5" width="16" height="2.1" rx="1.05" />
+    <rect x="19.5" y="29" width="16" height="2.1" rx="1.05" />
+  </g>
+  <text
+    x="27.5"
+    y="21"
+    text-anchor="middle"
+    fill="#fff"
+    font-family="system-ui, sans-serif"
+    font-size="9.5"
+    font-weight="700"
+    letter-spacing="-0.3">ODR</text
+  >
+</svg>

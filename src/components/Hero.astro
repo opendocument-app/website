@@ -1,0 +1,107 @@
+---
+import StoreBadge from './StoreBadge.astro';
+import Icon from './Icon.astro';
+import { primary } from '../data/links';
+---
+
+<section id="top" class="relative overflow-hidden">
+  <!-- A wash of the brand blue behind the fold, fading into the page. -->
+  <div
+    aria-hidden="true"
+    class="pointer-events-none absolute inset-x-0 -top-40 h-[32rem] bg-[radial-gradient(60%_60%_at_50%_40%,var(--md-primary-container)_0%,transparent_70%)] opacity-60"
+  >
+  </div>
+
+  <div class="relative mx-auto max-w-6xl px-4 pb-16 pt-16 sm:px-6 sm:pt-24">
+    <div class="grid items-center gap-12 lg:grid-cols-[1.05fr_1fr]">
+      <div>
+        <p
+          class="mb-4 inline-flex items-center gap-2 rounded-full border border-outline-variant bg-surface-container px-3 py-1 text-xs font-medium text-on-surface-variant"
+        >
+          <Icon name="lock" class="h-3.5 w-3.5" />
+          Your documents never leave your device
+        </p>
+
+        <h1 class="text-4xl font-bold leading-[1.1] tracking-tight sm:text-5xl lg:text-6xl">
+          Open <span class="text-brand-text">any</span> office document,{' '}
+          <span class="text-primary">anywhere</span>.
+        </h1>
+
+        <p class="mt-5 max-w-xl text-lg leading-relaxed text-on-surface-variant">
+          OpenDocument Reader opens the files LibreOffice and OpenOffice write —
+          and most of what Microsoft Office and Apple iWork write too. On your
+          phone, offline, without an account, and without uploading anything.
+        </p>
+
+        <div class="mt-8 flex flex-wrap items-center gap-x-5 gap-y-4">
+          <StoreBadge store="play" href={primary.android} />
+          <StoreBadge store="appstore" href={primary.ios} />
+          <StoreBadge store="fdroid" href={primary.fdroid} />
+        </div>
+
+        <p class="mt-6 text-sm text-on-surface-variant">
+          Free, ad-supported, and{' '}
+          <a href="/#developers" class="font-medium text-primary underline-offset-4 hover:underline"
+            >open source</a
+          >. An ad-free paid edition is on both stores.
+        </p>
+      </div>
+
+      <!-- The three document kinds, as the launcher icon stacks them. -->
+      <div class="relative mx-auto w-full max-w-md lg:mx-0">
+        <div class="relative aspect-4/3">
+          <div
+            class="absolute left-2 top-10 h-56 w-44 rotate-[-8deg] rounded-2xl border border-outline-variant/50 bg-surface shadow-xl"
+          >
+            <div class="h-2 w-full rounded-t-2xl bg-brand-slide"></div>
+            <div class="space-y-2 p-4">
+              <div class="h-16 rounded-lg bg-brand-slide/20"></div>
+              <div class="h-2 w-3/4 rounded bg-surface-variant"></div>
+              <div class="h-2 w-1/2 rounded bg-surface-variant"></div>
+            </div>
+            <span class="absolute bottom-3 left-4 text-xs font-semibold text-brand-slide">ODP</span>
+          </div>
+
+          <div
+            class="absolute left-1/2 top-4 h-60 w-44 -translate-x-1/2 rotate-[3deg] rounded-2xl border border-outline-variant/50 bg-surface shadow-xl"
+          >
+            <div class="h-2 w-full rounded-t-2xl bg-brand-sheet"></div>
+            <div class="p-4">
+              <div
+                class="grid grid-cols-3 gap-px overflow-hidden rounded border border-outline-variant bg-outline-variant"
+              >
+                {
+                  Array.from({ length: 12 }).map((_, i) => (
+                    <div
+                      class:list={[
+                        'h-6 bg-surface',
+                        i < 3 && 'bg-brand-sheet/30',
+                        i >= 3 && i % 4 === 0 && 'bg-brand-sheet/15',
+                      ]}
+                    />
+                  ))
+                }
+              </div>
+            </div>
+            <span class="absolute bottom-3 left-4 text-xs font-semibold text-brand-sheet">ODS</span>
+          </div>
+
+          <div
+            class="absolute right-0 top-14 h-64 w-48 rotate-[9deg] rounded-2xl border border-outline-variant/50 bg-surface shadow-2xl"
+          >
+            <div class="h-2 w-full rounded-t-2xl bg-brand-text"></div>
+            <div class="space-y-2.5 p-4">
+              <div class="h-3 w-2/3 rounded bg-brand-text/40"></div>
+              <div class="h-2 w-full rounded bg-surface-variant"></div>
+              <div class="h-2 w-full rounded bg-surface-variant"></div>
+              <div class="h-2 w-4/5 rounded bg-surface-variant"></div>
+              <div class="h-2 w-full rounded bg-surface-variant"></div>
+              <div class="h-2 w-3/5 rounded bg-surface-variant"></div>
+            </div>
+            <span class="absolute bottom-3 left-4 text-xs font-semibold text-brand-text">ODT</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

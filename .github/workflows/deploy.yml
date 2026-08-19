@@ -1,0 +1,60 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A second push to main should supersede the first rather than race it to the
+# live channel; PR previews are per-branch for the same reason.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          # Astro 7 needs >= 22.12. `.nvmrc` is what local shells read too, so
+          # there is one place to bump it.
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      # `prebuild` vendors @opendocument/odr-core into public/odr/, so the wasm
+      # ships at whatever version package-lock pins.
+      - run: npm run build
+        env:
+          ASTRO_TELEMETRY_DISABLED: '1'
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: site
+          path: dist
+          retention-days: 7
+
+      # A push to main goes live; a pull request gets its own preview URL that
+      # expires on its own. Forks cannot read the service account, so the step
+      # is skipped for them rather than failing the run.
+      - name: Deploy to Firebase Hosting
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: FirebaseExtended/action-hosting-deploy@v0.11.0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: admob-app-id-9025061963
+          channelId: ${{ github.event_name == 'push' && 'live' || '' }}
+          expires: 14d

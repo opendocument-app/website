@@ -1,0 +1,65 @@
+---
+import Icon from './Icon.astro';
+import { repos } from '../data/links';
+
+const points = [
+  {
+    icon: 'lock',
+    title: 'Nothing is uploaded',
+    body: 'Documents are decoded on your device. There is no server to send them to, no account to make, and nothing to delete afterwards.',
+  },
+  {
+    icon: 'github',
+    title: 'Open source, all of it',
+    body: 'The apps, the rendering engine and its bindings are public. Read the code that opens your files, or build it yourself.',
+  },
+  {
+    icon: 'heart',
+    title: 'Made in Austria',
+    body: 'A small independent project, not a division of anything. Ads in the free edition pay for the work; the paid edition has none.',
+  },
+] as const;
+---
+
+<section class="border-t border-outline-variant/60 bg-surface-container/40 py-20">
+  <div class="mx-auto max-w-6xl px-4 sm:px-6">
+    <div class="grid gap-12 lg:grid-cols-[1fr_1.2fr] lg:gap-16">
+      <div>
+        <h2 class="text-3xl font-bold tracking-tight sm:text-4xl">
+          Your documents are yours
+        </h2>
+        <p class="mt-4 text-lg leading-relaxed text-on-surface-variant">
+          A document reader sees everything you open with it — contracts, notes,
+          payslips. That is a good reason to build one that never needs to send
+          any of it anywhere.
+        </p>
+        <a
+          href={repos.core}
+          target="_blank"
+          rel="noopener"
+          class="mt-6 inline-flex items-center gap-2 text-sm font-medium text-primary underline-offset-4 hover:underline"
+        >
+          <Icon name="github" class="h-4 w-4" />
+          Read the source
+          <Icon name="arrowRight" class="h-4 w-4" />
+        </a>
+      </div>
+
+      <ul class="grid gap-6 sm:grid-cols-1">
+        {
+          points.map((p) => (
+            <li class="flex gap-4">
+              <div class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-surface text-primary shadow-sm">
+                <Icon name={p.icon} class="h-5 w-5" />
+              </div>
+              <div>
+                <h3 class="font-semibold">{p.title}</h3>
+                <p class="mt-1.5 text-sm leading-relaxed text-on-surface-variant">{p.body}</p>
+              </div>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </div>
+</section>

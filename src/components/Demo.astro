@@ -1,0 +1,352 @@
+---
+import Icon from './Icon.astro';
+import { repos } from '../data/links';
+---
+
+<section id="try" class="border-y border-outline-variant/60 bg-surface-container/40 py-20">
+  <div class="mx-auto max-w-6xl px-4 sm:px-6">
+    <div class="mx-auto max-w-2xl text-center">
+      <h2 class="text-3xl font-bold tracking-tight sm:text-4xl">See for yourself</h2>
+      <p class="mt-4 text-lg leading-relaxed text-on-surface-variant">
+        This page runs the same C++ engine as the apps, compiled to WebAssembly.
+        Drop a document below and it is decoded and laid out{' '}
+        <strong class="font-semibold text-on-surface">inside your browser</strong> — nothing is
+        uploaded, and the page works with your network switched off.
+      </p>
+    </div>
+
+    <div
+      id="demo"
+      class="mx-auto mt-10 max-w-4xl overflow-hidden rounded-2xl border border-outline-variant bg-surface shadow-sm"
+    >
+      <!-- Idle / loading / error all live here; the frame replaces it once a
+           document renders. -->
+      <div id="demo-panel" class="p-6 sm:p-10">
+        <div
+          id="demo-zone"
+          class="flex flex-col items-center rounded-xl border-2 border-dashed border-outline-variant px-6 py-12 text-center transition-colors"
+        >
+          <div
+            id="demo-spinner"
+            hidden
+            class="mb-5 h-10 w-10 animate-spin rounded-full border-[3px] border-outline-variant border-t-primary"
+          >
+          </div>
+
+          <div id="demo-idle-icon" class="mb-5 rounded-full bg-primary-container p-4 text-on-primary-container">
+            <Icon name="upload" class="h-7 w-7" />
+          </div>
+
+          <p id="demo-status" class="text-lg font-medium">Drop a document here</p>
+          <p id="demo-hint" class="mt-2 text-sm text-on-surface-variant">
+            ODT, ODS, ODP, DOCX, XLSX, PPTX, PDF and more — it stays on your device
+          </p>
+
+          <div id="demo-actions" class="mt-7 flex flex-wrap items-center justify-center gap-3">
+            <button
+              id="demo-pick"
+              type="button"
+              class="rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-on-primary transition-opacity hover:opacity-90"
+            >
+              Choose a file
+            </button>
+            <button
+              id="demo-sample"
+              type="button"
+              class="rounded-full border border-outline px-5 py-2.5 text-sm font-medium transition-colors hover:bg-surface-container"
+            >
+              Try a sample document
+            </button>
+          </div>
+
+          <input id="demo-file" type="file" class="sr-only" />
+        </div>
+      </div>
+
+      <!-- Shown once something rendered. -->
+      <div id="demo-result" hidden>
+        <div
+          class="flex items-center gap-3 border-b border-outline-variant bg-surface-container px-4 py-2.5"
+        >
+          <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-brand-sheet"></span>
+          <p id="demo-filename" class="truncate text-sm font-medium"></p>
+          <p id="demo-meta" class="hidden shrink-0 text-xs text-on-surface-variant sm:block"></p>
+          <button
+            id="demo-reset"
+            type="button"
+            class="ml-auto shrink-0 rounded-full border border-outline px-3 py-1.5 text-xs font-medium transition-colors hover:bg-surface"
+          >
+            Open another
+          </button>
+        </div>
+        <!-- The frame is created per document rather than reused; see the
+             script for why. -->
+        <div id="demo-frame-host" class="h-[32rem] w-full bg-white"></div>
+      </div>
+    </div>
+
+    <p class="mx-auto mt-5 max-w-2xl text-center text-sm text-on-surface-variant">
+      Powered by{' '}
+      <a
+        href={repos.wasm}
+        target="_blank"
+        rel="noopener"
+        class="font-medium text-primary underline-offset-4 hover:underline">@opendocument/odr-core</a
+      > — the renderer is fetched only when you open something.
+    </p>
+  </div>
+</section>
+
+<script>
+  /*
+    The renderer is ~1.4 MB gzipped, so it is never part of the page load: the
+    first drop, pick or sample click pulls it in. It is served from `/odr/`
+    rather than bundled — the emscripten glue resolves its `.wasm` sibling from
+    `import.meta.url`, which survives being copied into `public/` untouched but
+    not being run through a bundler.
+  */
+  const ODR_ENTRY = '/odr/index.js';
+
+  const panel = document.getElementById('demo-panel') as HTMLElement;
+  const zone = document.getElementById('demo-zone') as HTMLElement;
+  const spinner = document.getElementById('demo-spinner') as HTMLElement;
+  const idleIcon = document.getElementById('demo-idle-icon') as HTMLElement;
+  const status = document.getElementById('demo-status') as HTMLElement;
+  const hint = document.getElementById('demo-hint') as HTMLElement;
+  const actions = document.getElementById('demo-actions') as HTMLElement;
+  const fileInput = document.getElementById('demo-file') as HTMLInputElement;
+  const pickBtn = document.getElementById('demo-pick') as HTMLButtonElement;
+  const sampleBtn = document.getElementById('demo-sample') as HTMLButtonElement;
+  const result = document.getElementById('demo-result') as HTMLElement;
+  const frameHost = document.getElementById('demo-frame-host') as HTMLElement;
+  const filename = document.getElementById('demo-filename') as HTMLElement;
+  const metaLabel = document.getElementById('demo-meta') as HTMLElement;
+  const resetBtn = document.getElementById('demo-reset') as HTMLButtonElement;
+
+  const DROP_ACTIVE = ['border-primary', 'bg-primary-container/30'];
+
+  let odrPromise: Promise<any> | null = null;
+  let currentDoc: any = null;
+  let currentUrl: string | null = null;
+
+  function loadOdr() {
+    if (!odrPromise) {
+      odrPromise = import(/* @vite-ignore */ ODR_ENTRY)
+        .then((m) => m.Odr.load())
+        .catch((e) => {
+          // Let the next attempt retry rather than caching the rejection.
+          odrPromise = null;
+          throw e;
+        });
+    }
+    return odrPromise;
+  }
+
+  function setBusy(message: string) {
+    spinner.hidden = false;
+    idleIcon.hidden = true;
+    actions.hidden = true;
+    hint.hidden = true;
+    status.textContent = message;
+  }
+
+  function setIdle(message: string, detail: string, isError = false) {
+    spinner.hidden = true;
+    idleIcon.hidden = false;
+    actions.hidden = false;
+    hint.hidden = false;
+    status.textContent = message;
+    hint.textContent = detail;
+    status.classList.toggle('text-red-600', isError);
+    status.classList.toggle('dark:text-red-400', isError);
+  }
+
+  /* Lets the busy message actually paint before `render()` blocks the thread. */
+  const nextFrame = () =>
+    new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      requestAnimationFrame(() => requestAnimationFrame(finish));
+      // A background tab fires no animation frames at all, so this is not a
+      // belt-and-braces fallback: without it, a document opened just before
+      // switching tabs strands the panel on "Opening…" until you come back.
+      setTimeout(finish, 50);
+    });
+
+  function friendlyError(e: any, name: string) {
+    switch (e?.name) {
+      case 'UnsupportedFileType':
+      case 'UnknownFileType':
+        return [`${name} is not a format we can open`, 'Try an ODT, DOCX, XLSX, PPTX or PDF file.'];
+      case 'FileNotFound':
+      case 'NoDocumentFile':
+        return [`${name} could not be read`, 'The file looks empty or truncated.'];
+      default:
+        return [`${name} could not be opened`, e?.message ? String(e.message) : 'Unknown error.'];
+    }
+  }
+
+  function teardown() {
+    currentDoc?.close();
+    currentDoc = null;
+    frameHost.replaceChildren();
+    if (currentUrl) {
+      URL.revokeObjectURL(currentUrl);
+      currentUrl = null;
+    }
+  }
+
+  /*
+    A fresh iframe per document, appended to a container that is already
+    visible. Reusing one long-lived frame looks tidier but races the layout:
+    assigning `src` to a frame that the browser has not laid out yet — because
+    it was `display:none` a moment ago, or because wasm instantiation hogged the
+    main thread through the intervening frames — loads the document and never
+    paints it. The frame stays blank and nothing later triggers a repaint. An
+    element appended to a laid-out parent has no such window.
+
+    `sandbox` deliberately omits `allow-same-origin`: the document gets an
+    opaque origin, so its own scripts run but it cannot reach this page. With
+    `embedImages` on, the markup is self-contained and needs nothing fetched.
+  */
+  function mountFrame(html: string) {
+    const frame = document.createElement('iframe');
+    frame.title = 'Rendered document';
+    frame.setAttribute('sandbox', 'allow-scripts');
+    frame.className = 'h-full w-full border-0 bg-white';
+    frameHost.replaceChildren(frame);
+
+    currentUrl = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+    frame.src = currentUrl;
+  }
+
+  async function open(bytes: Uint8Array, name: string) {
+    teardown();
+    setBusy('Loading the renderer…');
+
+    let odr;
+    try {
+      odr = await loadOdr();
+    } catch {
+      setIdle('The renderer could not be loaded', 'Check your connection and try again.', true);
+      return;
+    }
+
+    setBusy(`Opening ${name}…`);
+    await nextFrame();
+
+    try {
+      currentDoc = odr.open(bytes, { editable: false });
+    } catch (e) {
+      const [msg, detail] = friendlyError(e, name);
+      setIdle(msg, detail, true);
+      return;
+    }
+
+    if (currentDoc.isPasswordEncrypted()) {
+      teardown();
+      setIdle(
+        `${name} is password-protected`,
+        'The app opens encrypted documents; this demo does not ask for passwords.',
+        true,
+      );
+      return;
+    }
+
+    const views = currentDoc.listViews();
+
+    setBusy(`Rendering ${name}…`);
+    await nextFrame();
+
+    let html: string;
+    try {
+      html = currentDoc.render(0).html;
+    } catch (e) {
+      const [msg, detail] = friendlyError(e, name);
+      teardown();
+      setIdle(msg, detail, true);
+      return;
+    }
+
+    filename.textContent = name;
+    metaLabel.textContent =
+      views.length > 1 ? `showing 1 of ${views.length} views — the app shows them all` : '';
+    metaLabel.classList.toggle('hidden', views.length <= 1);
+
+    panel.hidden = true;
+    result.hidden = false;
+    mountFrame(html);
+  }
+
+  async function openFile(file: File) {
+    document.getElementById('try')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    panel.hidden = false;
+    result.hidden = true;
+    setBusy(`Reading ${file.name}…`);
+    await open(new Uint8Array(await file.arrayBuffer()), file.name);
+  }
+
+  pickBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files?.[0];
+    if (file) void openFile(file);
+    fileInput.value = '';
+  });
+
+  sampleBtn.addEventListener('click', async () => {
+    setBusy('Fetching the sample…');
+    try {
+      const response = await fetch('/sample.odt');
+      if (!response.ok) throw new Error(String(response.status));
+      await open(new Uint8Array(await response.arrayBuffer()), 'sample.odt');
+    } catch {
+      setIdle('The sample could not be fetched', 'Check your connection and try again.', true);
+    }
+  });
+
+  resetBtn.addEventListener('click', () => {
+    // `teardown` drops the frame along with the document and its blob URL.
+    teardown();
+    result.hidden = true;
+    panel.hidden = false;
+    setIdle('Drop a document here', 'ODT, ODS, ODP, DOCX, XLSX, PPTX, PDF and more — it stays on your device');
+  });
+
+  /* Dropping anywhere on the page works; the zone is what lights up. A counter,
+     because dragleave also fires when the pointer crosses a child element. */
+  let dragDepth = 0;
+
+  function highlight(on: boolean) {
+    zone.classList.toggle('border-dashed', !on);
+    for (const c of DROP_ACTIVE) zone.classList.toggle(c, on);
+  }
+
+  window.addEventListener('dragenter', (e) => {
+    if (!e.dataTransfer?.types.includes('Files')) return;
+    e.preventDefault();
+    if (++dragDepth === 1) highlight(true);
+  });
+  window.addEventListener('dragover', (e) => {
+    if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
+  });
+  window.addEventListener('dragleave', () => {
+    if (--dragDepth <= 0) {
+      dragDepth = 0;
+      highlight(false);
+    }
+  });
+  window.addEventListener('drop', (e) => {
+    if (!e.dataTransfer?.types.includes('Files')) return;
+    e.preventDefault();
+    dragDepth = 0;
+    highlight(false);
+    const file = e.dataTransfer.files[0];
+    if (file) void openFile(file);
+  });
+
+  window.addEventListener('pagehide', teardown);
+</script>

@@ -1,0 +1,99 @@
+---
+import Logo from './Logo.astro';
+import Icon from './Icon.astro';
+import { contact, packages, repos, stores } from '../data/links';
+
+const columns = [
+  {
+    title: 'Get it',
+    links: [
+      { label: 'Google Play', href: stores.android.free, external: true },
+      { label: 'App Store', href: stores.ios.free, external: true },
+      { label: 'F-Droid', href: stores.fdroid, external: true },
+    ],
+  },
+  {
+    title: 'Developers',
+    links: [
+      { label: 'GitHub', href: repos.org, external: true },
+      { label: 'npm', href: packages.npm, external: true },
+      { label: 'PyPI', href: packages.pypi, external: true },
+      { label: 'OpenDocument.core', href: repos.core, external: true },
+    ],
+  },
+  {
+    title: 'This page',
+    links: [
+      { label: 'Try it', href: '/#try', external: false },
+      { label: 'Features', href: '/#features', external: false },
+      { label: 'Formats', href: '/#formats', external: false },
+      { label: 'Download', href: '/#download', external: false },
+    ],
+  },
+  {
+    title: 'Contact',
+    links: [
+      { label: 'Support', href: contact.support, external: false },
+      { label: 'Privacy policy', href: contact.privacy, external: false },
+    ],
+  },
+] as const;
+
+const year = new Date().getFullYear();
+---
+
+<footer class="border-t border-outline-variant/60 bg-surface-container/40">
+  <div class="mx-auto max-w-6xl px-4 py-14 sm:px-6">
+    <div class="grid gap-10 sm:grid-cols-2 lg:grid-cols-[1.4fr_repeat(4,1fr)]">
+      <div>
+        <div class="flex items-center gap-2.5 font-semibold tracking-tight">
+          <Logo class="h-8 w-8" title="OpenDocument Reader" />
+          OpenDocument&nbsp;Reader
+        </div>
+        <p class="mt-4 max-w-xs text-sm leading-relaxed text-on-surface-variant">
+          View OpenOffice and LibreOffice documents on the go. Open source, made
+          in Austria.
+        </p>
+        <a
+          href={contact.support}
+          class="mt-4 inline-flex items-center gap-2 text-sm text-on-surface-variant transition-colors hover:text-primary"
+        >
+          <Icon name="mail" class="h-4 w-4" />
+          support@opendocument.app
+        </a>
+      </div>
+
+      {
+        columns.map((c) => (
+          <div>
+            <h3 class="text-sm font-semibold">{c.title}</h3>
+            <ul class="mt-3 space-y-2">
+              {c.links.map((l) => (
+                <li>
+                  <a
+                    href={l.href}
+                    target={l.external ? '_blank' : undefined}
+                    rel={l.external ? 'noopener' : undefined}
+                    class="text-sm text-on-surface-variant transition-colors hover:text-primary"
+                  >
+                    {l.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      }
+    </div>
+
+    <div
+      class="mt-12 flex flex-col gap-3 border-t border-outline-variant/60 pt-6 text-sm text-on-surface-variant sm:flex-row sm:items-center"
+    >
+      <p>© {year} Stefl und Taschauer OG</p>
+      <p class="sm:ml-auto">
+        Not affiliated with OpenOffice, LibreOffice, Apache or The Document
+        Foundation.
+      </p>
+    </div>
+  </div>
+</footer>

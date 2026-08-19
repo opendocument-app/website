@@ -1,0 +1,97 @@
+---
+import Icon from './Icon.astro';
+import { packages, repos } from '../data/links';
+
+const distributions = [
+  {
+    icon: 'npm',
+    name: '@opendocument/odr-core',
+    registry: 'npm',
+    href: packages.npm,
+    install: 'npm i @opendocument/odr-core',
+    body: 'The engine as WebAssembly. Render documents to HTML in a browser or in Node, with no server — it is what the demo above runs on.',
+    accent: 'text-[#cb3837]',
+  },
+  {
+    icon: 'python',
+    name: 'pyodr',
+    registry: 'PyPI',
+    href: packages.pypi,
+    install: 'pip install pyodr',
+    body: 'Python bindings to the same C++ library, for batch conversion, indexing pipelines and anything that needs documents as text.',
+    accent: 'text-[#3776ab]',
+  },
+  {
+    icon: 'github',
+    name: 'opendocument-app',
+    registry: 'GitHub',
+    href: repos.org,
+    install: 'git clone OpenDocument.core',
+    body: 'The C++ engine, the Android and iOS apps, the rendering test corpus and the packaging recipes. Issues and pull requests welcome.',
+    accent: '',
+  },
+] as const;
+---
+
+<section id="developers" class="border-t border-outline-variant/60 py-20">
+  <div class="mx-auto max-w-6xl px-4 sm:px-6">
+    <div class="max-w-2xl">
+      <h2 class="text-3xl font-bold tracking-tight sm:text-4xl">Use the engine yourself</h2>
+      <p class="mt-4 text-lg leading-relaxed text-on-surface-variant">
+        The part that reads the documents is a C++ library called{' '}
+        <a
+          href={repos.core}
+          target="_blank"
+          rel="noopener"
+          class="font-medium text-primary underline-offset-4 hover:underline">OpenDocument.core</a
+        >. It is published for the web and for Python, under the MPL-2.0.
+      </p>
+    </div>
+
+    <div class="mt-12 grid gap-6 lg:grid-cols-3">
+      {
+        distributions.map((d) => (
+          <a
+            href={d.href}
+            target="_blank"
+            rel="noopener"
+            class="group flex flex-col rounded-2xl border border-outline-variant bg-surface p-6 transition-colors hover:border-primary"
+          >
+            <div class="flex items-center gap-3">
+              <Icon name={d.icon} class={`h-7 w-7 ${d.accent}`} />
+              <span class="text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
+                {d.registry}
+              </span>
+              <Icon
+                name="arrowRight"
+                class="ml-auto h-4 w-4 text-on-surface-variant transition-transform group-hover:translate-x-0.5 group-hover:text-primary"
+              />
+            </div>
+
+            <h3 class="mt-4 font-mono text-sm font-semibold break-all">{d.name}</h3>
+            <p class="mt-2 flex-1 text-sm leading-relaxed text-on-surface-variant">{d.body}</p>
+
+            <code
+              class="mt-5 block overflow-x-auto rounded-lg bg-surface-container px-3 py-2 font-mono text-xs text-on-surface-variant"
+            >
+              {d.install}
+            </code>
+          </a>
+        ))
+      }
+    </div>
+
+    <div
+      class="mt-8 flex flex-col gap-4 rounded-2xl border border-outline-variant bg-surface-container/50 p-6 sm:flex-row sm:items-center"
+    >
+      <Icon name="code" class="h-6 w-6 shrink-0 text-primary" />
+      <p class="text-sm leading-relaxed text-on-surface-variant">
+        Both apps compile no native code of their own — Android pulls an{' '}
+        <code class="rounded bg-surface px-1.5 py-0.5 font-mono text-xs">odr-core-android</code> AAR
+        from Maven Central and iOS a{' '}
+        <code class="rounded bg-surface px-1.5 py-0.5 font-mono text-xs">OdrCoreObjC</code> Swift package,
+        so every platform reads documents through exactly the same code.
+      </p>
+    </div>
+  </div>
+</section>

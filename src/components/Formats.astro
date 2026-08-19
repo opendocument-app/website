@@ -1,0 +1,82 @@
+---
+/*
+  The format list from the store description, grouped so it reads as a table of
+  capability rather than a wall of extensions. The three ODF entries carry the
+  launcher icon's colours.
+*/
+const odf = [
+  { ext: 'ODT', app: 'Writer', tone: 'text' },
+  { ext: 'ODS', app: 'Calc', tone: 'sheet' },
+  { ext: 'ODP', app: 'Impress', tone: 'slide' },
+  { ext: 'ODG', app: 'Draw', tone: 'text' },
+] as const;
+
+const groups = [
+  {
+    title: 'Microsoft Office',
+    items: ['DOC', 'DOCX', 'XLS', 'XLSX', 'PPT', 'PPTX'],
+  },
+  { title: 'Apple iWork', items: ['Pages', 'Numbers', 'Keynote'] },
+  { title: 'Documents', items: ['PDF', 'RTF', 'TXT', 'CSV', 'HTML'] },
+  { title: 'Images', items: ['JPG', 'PNG', 'GIF', 'WEBP', 'TIFF', 'BMP', 'SVG'] },
+  { title: 'Media', items: ['MP4', 'WEBM', 'MP3', 'OGG'] },
+  { title: 'And the awkward ones', items: ['ZIP', 'EPS', 'DXF', 'PSD'] },
+] as const;
+
+const tones = {
+  text: 'text-brand-text bg-brand-text/10 border-brand-text/30',
+  sheet: 'text-brand-sheet bg-brand-sheet/10 border-brand-sheet/30',
+  slide: 'text-brand-slide bg-brand-slide/10 border-brand-slide/30',
+} as const;
+---
+
+<section id="formats" class="border-t border-outline-variant/60 py-20">
+  <div class="mx-auto max-w-6xl px-4 sm:px-6">
+    <div class="max-w-2xl">
+      <h2 class="text-3xl font-bold tracking-tight sm:text-4xl">
+        Built for ODF. Fluent in the rest.
+      </h2>
+      <p class="mt-4 text-lg leading-relaxed text-on-surface-variant">
+        The Open Document Format is what LibreOffice and OpenOffice write, and
+        it is what this reader was built around. Everything else it learned
+        because you get sent those too.
+      </p>
+    </div>
+
+    <div class="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {
+        odf.map((f) => (
+          <div class:list={['rounded-2xl border p-5', tones[f.tone]]}>
+            <p class="text-2xl font-bold tracking-tight">{f.ext}</p>
+            <p class="mt-1 text-sm text-on-surface-variant">LibreOffice {f.app}</p>
+          </div>
+        ))
+      }
+    </div>
+
+    <div class="mt-10 grid gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
+      {
+        groups.map((g) => (
+          <div>
+            <h3 class="text-sm font-semibold uppercase tracking-wide text-on-surface-variant">
+              {g.title}
+            </h3>
+            <ul class="mt-3 flex flex-wrap gap-2">
+              {g.items.map((i) => (
+                <li class="rounded-lg border border-outline-variant bg-surface-container px-2.5 py-1 text-sm">
+                  {i}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      }
+    </div>
+
+    <p class="mt-10 max-w-2xl text-sm leading-relaxed text-on-surface-variant">
+      ODF is also the format behind NeoOffice, StarOffice, Collabora, OnlyOffice,
+      IBM Lotus Symphony, WPS Office, AndrOpen Office and a long tail of others —
+      if a suite exports ODT, ODS or ODP, this opens it.
+    </p>
+  </div>
+</section>

@@ -1,0 +1,30 @@
+---
+import Base from '../layouts/Base.astro';
+import Logo from '../components/Logo.astro';
+---
+
+<Base
+  title="Page not found — OpenDocument Reader"
+  description="That page does not exist. Head back to opendocument.app."
+>
+  <main class="grid min-h-screen place-items-center px-6 text-center">
+    <div>
+      <Logo class="mx-auto h-16 w-16" title="OpenDocument Reader" />
+      <p class="mt-8 text-sm font-semibold uppercase tracking-wide text-on-surface-variant">
+        404
+      </p>
+      <h1 class="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
+        This page could not be opened
+      </h1>
+      <p class="mx-auto mt-4 max-w-md leading-relaxed text-on-surface-variant">
+        Unlike your documents, which almost certainly can be.
+      </p>
+      <a
+        href="/"
+        class="mt-8 inline-block rounded-full bg-primary px-6 py-3 text-sm font-medium text-on-primary transition-opacity hover:opacity-90"
+      >
+        Back to OpenDocument Reader
+      </a>
+    </div>
+  </main>
+</Base>

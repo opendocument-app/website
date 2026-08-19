@@ -1,0 +1,59 @@
+---
+/*
+  Official store artwork, self-hosted. The three assets do not share a geometry:
+  Google's and F-Droid's PNGs carry the mandated clear space inside the image
+  (content is 67.2% of the frame height, measured), while Apple's SVG is the
+  button and nothing else. Sizing them all to the same *frame* height would make
+  Apple's look a third too big, so each is scaled to a common *content* height.
+*/
+interface Props {
+  store: 'play' | 'appstore' | 'fdroid';
+  href: string;
+  /** Rendered height of the button itself, padding excluded. */
+  height?: number;
+}
+const { store, href, height = 48 } = Astro.props;
+
+// Fraction of the PNG frame occupied by the button, from the alpha bounding box.
+const CLEAR_SPACE_RATIO = 0.672;
+
+const assets = {
+  play: {
+    src: '/badges/google-play.png',
+    alt: 'Get it on Google Play',
+    padded: true,
+  },
+  appstore: {
+    src: '/badges/app-store.svg',
+    alt: 'Download on the App Store',
+    padded: false,
+  },
+  fdroid: {
+    src: '/badges/fdroid.png',
+    alt: 'Get it on F-Droid',
+    padded: true,
+  },
+} as const;
+
+const { src, alt, padded } = assets[store];
+const frameHeight = padded ? height / CLEAR_SPACE_RATIO : height;
+// Pull the clear space back in so badges sit on a shared baseline; the gap
+// between them in the flex row still honours it.
+const bleed = (frameHeight - height) / 2;
+---
+
+<a
+  href={href}
+  target="_blank"
+  rel="noopener"
+  class="inline-block shrink-0 transition-transform duration-200 hover:scale-[1.03] motion-reduce:hover:scale-100"
+>
+  <img
+    src={src}
+    alt={alt}
+    height={frameHeight}
+    style={`height:${frameHeight}px;width:auto;margin-block:${-bleed}px`}
+    loading="lazy"
+    decoding="async"
+  />
+</a>
