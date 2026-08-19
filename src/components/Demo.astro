@@ -81,7 +81,7 @@ import { repos } from '../data/links';
         </div>
         <!-- The frame is created per document rather than reused; see the
              script for why. -->
-        <div id="demo-frame-host" class="h-[32rem] w-full bg-white"></div>
+        <div id="demo-frame-host" class="h-[32rem] w-full bg-surface-container"></div>
       </div>
     </div>
 
@@ -224,7 +224,10 @@ import { repos } from '../data/links';
     const frame = document.createElement('iframe');
     frame.title = 'Rendered document';
     frame.setAttribute('sandbox', 'allow-scripts');
-    frame.className = 'h-full w-full border-0 bg-white';
+    // No background of our own: a rendered document paints its own canvas
+    // (white for text flow, #525659 behind paginated pages), and forcing white
+    // here is what shows through when a phone rubber-bands past the content.
+    frame.className = 'h-full w-full border-0';
     frameHost.replaceChildren(frame);
     frame.srcdoc = html;
   }
