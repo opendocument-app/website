@@ -134,7 +134,6 @@ import { repos } from '../data/links';
 
   let odrPromise: Promise<any> | null = null;
   let currentDoc: any = null;
-  let currentUrl: string | null = null;
 
   function loadOdr() {
     if (!odrPromise) {
@@ -201,20 +200,21 @@ import { repos } from '../data/links';
     currentDoc?.close();
     currentDoc = null;
     frameHost.replaceChildren();
-    if (currentUrl) {
-      URL.revokeObjectURL(currentUrl);
-      currentUrl = null;
-    }
   }
 
   /*
     A fresh iframe per document, appended to a container that is already
     visible. Reusing one long-lived frame looks tidier but races the layout:
-    assigning `src` to a frame that the browser has not laid out yet — because
-    it was `display:none` a moment ago, or because wasm instantiation hogged the
-    main thread through the intervening frames — loads the document and never
-    paints it. The frame stays blank and nothing later triggers a repaint. An
-    element appended to a laid-out parent has no such window.
+    assigning content to a frame the browser has not laid out yet - because it
+    was `display:none` a moment ago, or because wasm instantiation hogged the
+    main thread through the intervening frames - loads the document and never
+    paints it.
+
+    The markup goes in through `srcdoc` rather than a `blob:` URL. Both are
+    equivalent on Chrome and Firefox, but iOS Safari does not reliably render a
+    `blob:` document inside an iframe - it shows an empty frame - and that is
+    what a phone saw here. `srcdoc` also removes the object-URL lifecycle, so
+    there is no revoke to get wrong.
 
     `sandbox` deliberately omits `allow-same-origin`: the document gets an
     opaque origin, so its own scripts run but it cannot reach this page. With
@@ -226,9 +226,7 @@ import { repos } from '../data/links';
     frame.setAttribute('sandbox', 'allow-scripts');
     frame.className = 'h-full w-full border-0 bg-white';
     frameHost.replaceChildren(frame);
-
-    currentUrl = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
-    frame.src = currentUrl;
+    frame.srcdoc = html;
   }
 
   async function open(bytes: Uint8Array, name: string) {
