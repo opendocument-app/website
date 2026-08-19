@@ -70,7 +70,6 @@ import { repos } from '../data/links';
         >
           <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-brand-sheet"></span>
           <p id="demo-filename" class="truncate text-sm font-medium"></p>
-          <p id="demo-meta" class="hidden shrink-0 text-xs text-on-surface-variant lg:block"></p>
 
           <!-- A document's own `<meta name="viewport">` is inert inside an
                iframe, so the renderer's fit-to-width never applies here and a
@@ -146,7 +145,6 @@ import { repos } from '../data/links';
   const result = document.getElementById('demo-result') as HTMLElement;
   const frameHost = document.getElementById('demo-frame-host') as HTMLElement;
   const filename = document.getElementById('demo-filename') as HTMLElement;
-  const metaLabel = document.getElementById('demo-meta') as HTMLElement;
   const resetBtn = document.getElementById('demo-reset') as HTMLButtonElement;
   const zoomBar = document.getElementById('demo-zoom') as HTMLElement;
   const zoomOutBtn = document.getElementById('demo-zoom-out') as HTMLButtonElement;
@@ -365,11 +363,13 @@ import { repos } from '../data/links';
       return;
     }
 
-    const views = currentDoc.listViews();
-
     setBusy(`Rendering ${name}…`);
     await nextFrame();
 
+    // View 0 is the document itself. A spreadsheet's further views are its
+    // other sheets, and what counts as one is the renderer's business, not
+    // something worth reporting in a chrome bar that would only ever be
+    // approximately right.
     let html: string;
     try {
       html = currentDoc.render(0).html;
@@ -381,9 +381,6 @@ import { repos } from '../data/links';
     }
 
     filename.textContent = name;
-    metaLabel.textContent =
-      views.length > 1 ? `showing 1 of ${views.length} views — the app shows them all` : '';
-    metaLabel.classList.toggle('hidden', views.length <= 1);
 
     panel.hidden = true;
     result.hidden = false;
