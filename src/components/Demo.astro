@@ -70,13 +70,39 @@ import { repos } from '../data/links';
         >
           <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-brand-sheet"></span>
           <p id="demo-filename" class="truncate text-sm font-medium"></p>
-          <p id="demo-meta" class="hidden shrink-0 text-xs text-on-surface-variant sm:block"></p>
+          <p id="demo-meta" class="hidden shrink-0 text-xs text-on-surface-variant lg:block"></p>
+
+          <!-- A document's own `<meta name="viewport">` is inert inside an
+               iframe, so the renderer's fit-to-width never applies here and a
+               phone cannot pinch the document. These drive it from outside. -->
+          <div id="demo-zoom" hidden class="ml-auto flex shrink-0 items-center gap-0.5">
+            <button
+              id="demo-zoom-out"
+              type="button"
+              aria-label="Zoom out"
+              class="flex h-7 w-7 items-center justify-center rounded-full border border-outline text-sm leading-none transition-colors hover:bg-surface disabled:opacity-40"
+            >&minus;</button>
+            <button
+              id="demo-zoom-level"
+              type="button"
+              title="Fit to width"
+              class="min-w-[3.25rem] rounded-full px-1 py-1 text-xs font-medium tabular-nums transition-colors hover:bg-surface"
+            >100%</button>
+            <button
+              id="demo-zoom-in"
+              type="button"
+              aria-label="Zoom in"
+              class="flex h-7 w-7 items-center justify-center rounded-full border border-outline text-sm leading-none transition-colors hover:bg-surface disabled:opacity-40"
+            >+</button>
+          </div>
+
           <button
             id="demo-reset"
             type="button"
-            class="ml-auto shrink-0 rounded-full border border-outline px-3 py-1.5 text-xs font-medium transition-colors hover:bg-surface"
+            class="shrink-0 rounded-full border border-outline px-3 py-1.5 text-xs font-medium transition-colors hover:bg-surface"
           >
-            Open another
+            <span class="hidden sm:inline">Open another</span>
+            <span class="sm:hidden">Close</span>
           </button>
         </div>
         <!-- The frame is created per document rather than reused; see the
@@ -122,6 +148,10 @@ import { repos } from '../data/links';
   const filename = document.getElementById('demo-filename') as HTMLElement;
   const metaLabel = document.getElementById('demo-meta') as HTMLElement;
   const resetBtn = document.getElementById('demo-reset') as HTMLButtonElement;
+  const zoomBar = document.getElementById('demo-zoom') as HTMLElement;
+  const zoomOutBtn = document.getElementById('demo-zoom-out') as HTMLButtonElement;
+  const zoomInBtn = document.getElementById('demo-zoom-in') as HTMLButtonElement;
+  const zoomLabel = document.getElementById('demo-zoom-level') as HTMLButtonElement;
 
   const DROP_ACTIVE = ['border-primary', 'bg-primary-container/30'];
 
@@ -131,6 +161,16 @@ import { repos } from '../data/links';
   const IDLE_TITLE = CAN_DROP ? 'Drop a document here' : 'Open a document';
   const IDLE_HINT =
     'ODT, ODS, ODP, DOCX, XLSX, PPTX, PDF and more \u2014 it stays on your device';
+
+  const ZOOM_MIN = 0.25;
+  const ZOOM_MAX = 4;
+  const ZOOM_STEP = 1.25;
+
+  let currentFrame: HTMLIFrameElement | null = null;
+  /** Scale at which the document's full width fits the frame. */
+  let fitZoom = 1;
+  /** null means "follow the fit", any number is a deliberate choice. */
+  let userZoom: number | null = null;
 
   let odrPromise: Promise<any> | null = null;
   let currentDoc: any = null;
@@ -200,6 +240,8 @@ import { repos } from '../data/links';
     currentDoc?.close();
     currentDoc = null;
     frameHost.replaceChildren();
+    currentFrame = null;
+    zoomBar.hidden = true;
   }
 
   /*
@@ -223,13 +265,66 @@ import { repos } from '../data/links';
   function mountFrame(html: string) {
     const frame = document.createElement('iframe');
     frame.title = 'Rendered document';
-    frame.setAttribute('sandbox', 'allow-scripts');
+    // `allow-same-origin` without `allow-scripts`: reading the document is what
+    // lets us size it, and no script can run in the frame at all. That is
+    // strictly tighter than the reverse - the renderer's own inline scripts
+    // were already refused by the page's `script-src`, so nothing is lost.
+    frame.setAttribute('sandbox', 'allow-same-origin');
     // No background of our own: a rendered document paints its own canvas
     // (white for text flow, #525659 behind paginated pages), and forcing white
     // here is what shows through when a phone rubber-bands past the content.
     frame.className = 'h-full w-full border-0';
+    frame.addEventListener('load', () => {
+      currentFrame = frame;
+      userZoom = null;
+      measureFit();
+      applyZoom();
+      zoomBar.hidden = false;
+    });
     frameHost.replaceChildren(frame);
     frame.srcdoc = html;
+  }
+
+  /* The frame is same-origin, so the document can be measured from here. */
+  function frameDocument() {
+    try {
+      return currentFrame?.contentDocument ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  function measureFit() {
+    const doc = frameDocument();
+    const root = doc?.documentElement;
+    if (!root || !currentFrame) return;
+    // Measure unscaled, or each pass would compound the previous one.
+    const previous = root.style.zoom;
+    root.style.zoom = '1';
+    const content = Math.max(root.scrollWidth, doc?.body?.scrollWidth ?? 0);
+    root.style.zoom = previous;
+
+    const available = currentFrame.clientWidth;
+    if (!content || !available) return;
+    // Never enlarge: a document narrower than the frame belongs at its own size.
+    fitZoom = Math.min(1, available / content);
+  }
+
+  function applyZoom() {
+    const root = frameDocument()?.documentElement;
+    if (!root) return;
+    const zoom = userZoom ?? fitZoom;
+    root.style.zoom = String(zoom);
+    zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+    zoomOutBtn.disabled = zoom <= ZOOM_MIN;
+    zoomInBtn.disabled = zoom >= ZOOM_MAX;
+  }
+
+  const clampZoom = (zoom: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom));
+
+  function nudgeZoom(factor: number) {
+    userZoom = clampZoom((userZoom ?? fitZoom) * factor);
+    applyZoom();
   }
 
   async function open(bytes: Uint8Array, name: string) {
@@ -364,6 +459,24 @@ import { repos } from '../data/links';
   if (!CAN_DROP) {
     status.textContent = IDLE_TITLE;
   }
+
+  zoomInBtn.addEventListener('click', () => nudgeZoom(ZOOM_STEP));
+  zoomOutBtn.addEventListener('click', () => nudgeZoom(1 / ZOOM_STEP));
+  zoomLabel.addEventListener('click', () => {
+    userZoom = null;
+    measureFit();
+    applyZoom();
+  });
+
+  // A rotated phone changes the frame width, so the fit has to be recomputed.
+  let resizeTimer: number | undefined;
+  window.addEventListener('resize', () => {
+    window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(() => {
+      measureFit();
+      if (userZoom === null) applyZoom();
+    }, 150);
+  });
 
   window.addEventListener('pagehide', teardown);
 </script>
