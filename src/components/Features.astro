@@ -58,24 +58,31 @@ const features = [
       </p>
     </div>
 
-    <ul class="mt-12 grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-4">
+    {/*
+      One column on a phone, where a tile on its own line above two lines of
+      text leaves each entry floating in white space. There the icon sits beside
+      the heading instead; from `sm` up the grid is wide enough for the stack.
+    */}
+    <ul class="mt-12 grid gap-x-8 gap-y-8 sm:grid-cols-2 sm:gap-y-10 lg:grid-cols-4">
       {
         features.map((f) => (
-          <li>
-            <div class="mb-4 inline-flex rounded-xl bg-primary-container p-3 text-on-primary-container">
+          <li class="flex gap-4 sm:block">
+            <div class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-container text-on-primary-container sm:mb-4">
               <Icon name={f.icon} class="h-5 w-5" />
             </div>
-            <h3 class="font-semibold">{f.title}</h3>
-            <p class="mt-1.5 text-sm leading-relaxed text-on-surface-variant">{f.body}</p>
+            <div>
+              <h3 class="font-semibold">{f.title}</h3>
+              <p class="mt-1.5 text-sm leading-relaxed text-on-surface-variant">{f.body}</p>
+            </div>
           </li>
         ))
       }
     </ul>
 
     <div
-      class="mt-14 flex flex-col gap-4 rounded-2xl border border-outline-variant bg-surface-container/50 p-6 sm:flex-row sm:items-center sm:gap-6 sm:p-8"
+      class="mt-14 flex flex-col items-start gap-4 rounded-2xl border border-outline-variant bg-surface-container/50 p-6 sm:flex-row sm:items-center sm:gap-6 sm:p-8"
     >
-      <div class="inline-flex shrink-0 rounded-xl bg-brand-text/15 p-3 text-brand-text">
+      <div class="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-text/15 text-brand-text">
         <Icon name="bolt" class="h-6 w-6" />
       </div>
       <div>
