@@ -125,6 +125,13 @@ import { repos } from '../data/links';
 
   const DROP_ACTIVE = ['border-primary', 'bg-primary-container/30'];
 
+  /* Touch devices have no drag and drop, so "drop a document here" describes an
+     action the visitor cannot perform. */
+  const CAN_DROP = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  const IDLE_TITLE = CAN_DROP ? 'Drop a document here' : 'Open a document';
+  const IDLE_HINT =
+    'ODT, ODS, ODP, DOCX, XLSX, PPTX, PDF and more \u2014 it stays on your device';
+
   let odrPromise: Promise<any> | null = null;
   let currentDoc: any = null;
   let currentUrl: string | null = null;
@@ -231,8 +238,13 @@ import { repos } from '../data/links';
     let odr;
     try {
       odr = await loadOdr();
-    } catch {
-      setIdle('The renderer could not be loaded', 'Check your connection and try again.', true);
+    } catch (e: any) {
+      const detail = [e?.name, e?.message].filter(Boolean).join(': ');
+      setIdle(
+        'The renderer could not be loaded',
+        detail || 'Check your connection and try again.',
+        true,
+      );
       return;
     }
 
@@ -313,7 +325,7 @@ import { repos } from '../data/links';
     teardown();
     result.hidden = true;
     panel.hidden = false;
-    setIdle('Drop a document here', 'ODT, ODS, ODP, DOCX, XLSX, PPTX, PDF and more — it stays on your device');
+    setIdle(IDLE_TITLE, IDLE_HINT);
   });
 
   /* Dropping anywhere on the page works; the zone is what lights up. A counter,
@@ -347,6 +359,10 @@ import { repos } from '../data/links';
     const file = e.dataTransfer.files[0];
     if (file) void openFile(file);
   });
+
+  if (!CAN_DROP) {
+    status.textContent = IDLE_TITLE;
+  }
 
   window.addEventListener('pagehide', teardown);
 </script>
