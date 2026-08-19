@@ -21,17 +21,18 @@ const points = [
 ] as const;
 ---
 
-<section class="border-t border-outline-variant/60 bg-surface-container/40 py-20">
+<section id="privacy" class="border-t border-outline-variant/60 bg-surface-container/40 py-20">
   <div class="mx-auto max-w-6xl px-4 sm:px-6">
     <div class="grid gap-12 lg:grid-cols-[1fr_1.2fr] lg:gap-16">
       <div>
-        <h2 class="text-3xl font-bold tracking-tight sm:text-4xl">
-          Your documents are yours
+        <p class="text-sm font-semibold uppercase tracking-wide text-primary">Privacy</p>
+        <h2 class="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
+          Privacy you don't have to take on trust
         </h2>
         <p class="mt-4 text-lg leading-relaxed text-on-surface-variant">
           A document reader sees everything you open with it — contracts, notes,
-          payslips. That is a good reason to build one that never needs to send
-          any of it anywhere.
+          payslips. This one has nowhere to send any of it: there is no server
+          behind the app, and the code that opens your files is public.
         </p>
         <a
           href={repos.core}
