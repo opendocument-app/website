@@ -1,7 +1,7 @@
 ---
 import Logo from './Logo.astro';
 import Icon from './Icon.astro';
-import { contact, packages, repos, stores } from '../data/links';
+import { contact, funding, packages, repos, stores } from '../data/links';
 
 const columns = [
   {
@@ -19,6 +19,7 @@ const columns = [
       { label: 'npm', href: packages.npm, external: true },
       { label: 'PyPI', href: packages.pypi, external: true },
       { label: 'OpenDocument.core', href: repos.core, external: true },
+      { label: 'Sponsor', href: funding.sponsors, external: true },
     ],
   },
   {

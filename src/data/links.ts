@@ -46,6 +46,11 @@ export const repos = {
   py: 'https://github.com/opendocument-app/OpenDocument.py',
 } as const;
 
+/* The GitHub Sponsors page for the organisation, not for a single repository. */
+export const funding = {
+  sponsors: 'https://github.com/sponsors/opendocument-app',
+} as const;
+
 export const contact = {
   support: 'mailto:support@opendocument.app',
   /* Hosted here rather than on the author's blog, which is where the old site

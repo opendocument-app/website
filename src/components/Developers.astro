@@ -1,6 +1,6 @@
 ---
 import Icon from './Icon.astro';
-import { packages, repos } from '../data/links';
+import { funding, packages, repos } from '../data/links';
 
 const distributions = [
   {
@@ -91,6 +91,22 @@ const distributions = [
         from Maven Central and iOS a{' '}
         <code class="rounded bg-surface px-1.5 py-0.5 font-mono text-xs">OdrCoreObjC</code> Swift package,
         so every platform reads documents through exactly the same code.
+      </p>
+    </div>
+
+    <div
+      class="mt-4 flex flex-col gap-4 rounded-2xl border border-outline-variant bg-surface-container/50 p-6 sm:flex-row sm:items-center"
+    >
+      <Icon name="heart" class="h-6 w-6 shrink-0 text-primary" />
+      <p class="text-sm leading-relaxed text-on-surface-variant">
+        The engine is maintained in the open and paid for by the apps. If it
+        saves you work, you can{' '}
+        <a
+          href={funding.sponsors}
+          target="_blank"
+          rel="noopener"
+          class="font-medium text-primary underline-offset-4 hover:underline">sponsor it on GitHub</a
+        >.
       </p>
     </div>
   </div>
