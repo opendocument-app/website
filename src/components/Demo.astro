@@ -71,9 +71,10 @@ import { repos } from '../data/links';
           <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-brand-sheet"></span>
           <p id="demo-filename" class="truncate text-sm font-medium"></p>
 
-          <!-- A document's own `<meta name="viewport">` is inert inside an
-               iframe, so the renderer's fit-to-width never applies here and a
-               phone cannot pinch the document. These drive it from outside. -->
+          <!-- The renderer fits the document to the width it is rendered for,
+               and answers for the zoom after that through a script the frame
+               does not get to run. A phone cannot pinch an iframe either, so
+               these drive the zoom from outside. -->
           <div id="demo-zoom" hidden class="ml-auto flex shrink-0 items-center gap-0.5">
             <button
               id="demo-zoom-out"
@@ -142,6 +143,7 @@ import { repos } from '../data/links';
   const fileInput = document.getElementById('demo-file') as HTMLInputElement;
   const pickBtn = document.getElementById('demo-pick') as HTMLButtonElement;
   const sampleBtn = document.getElementById('demo-sample') as HTMLButtonElement;
+  const demo = document.getElementById('demo') as HTMLElement;
   const result = document.getElementById('demo-result') as HTMLElement;
   const frameHost = document.getElementById('demo-frame-host') as HTMLElement;
   const filename = document.getElementById('demo-filename') as HTMLElement;
@@ -165,6 +167,11 @@ import { repos } from '../data/links';
   const ZOOM_STEP = 1.25;
 
   let currentFrame: HTMLIFrameElement | null = null;
+  /** The width the document was rendered for, which it was fitted to. */
+  let renderedFor = 0;
+  /** The document's own width in css pixels where the renderer stated it;
+      null where it has to be measured, because it may also reflow. */
+  let statedPixels: number | null = null;
   /** Scale at which the document's full width fits the frame. */
   let fitZoom = 1;
   /** null means "follow the fit", any number is a deliberate choice. */
@@ -226,6 +233,11 @@ import { repos } from '../data/links';
       case 'UnsupportedFileType':
       case 'UnknownFileType':
         return [`${name} is not a format we can open`, 'Try an ODT, DOCX, XLSX, PPTX or PDF file.'];
+      case 'FileEncrypted':
+        return [
+          `${name} is password-protected`,
+          'The app opens encrypted documents; this demo does not ask for passwords.',
+        ];
       case 'FileNotFound':
       case 'NoDocumentFile':
         return [`${name} could not be read`, 'The file looks empty or truncated.'];
@@ -263,10 +275,11 @@ import { repos } from '../data/links';
   function mountFrame(html: string) {
     const frame = document.createElement('iframe');
     frame.title = 'Rendered document';
-    // `allow-same-origin` without `allow-scripts`: reading the document is what
-    // lets us size it, and no script can run in the frame at all. That is
-    // strictly tighter than the reverse - the renderer's own inline scripts
-    // were already refused by the page's `script-src`, so nothing is lost.
+    // `allow-same-origin` without `allow-scripts`: reaching into the document
+    // is what lets the zoom bar drive it, and no script can run in the frame at
+    // all. That is strictly tighter than the reverse - the renderer's own inline
+    // scripts were already refused by the page's `script-src`, so nothing is
+    // lost but its zoom api, which the fit written into its css stands in for.
     frame.setAttribute('sandbox', 'allow-same-origin');
     // No background of our own: a rendered document paints its own canvas
     // (white for text flow, #525659 behind paginated pages), and forcing white
@@ -275,7 +288,12 @@ import { repos } from '../data/links';
     frame.addEventListener('load', () => {
       currentFrame = frame;
       userZoom = null;
-      measureFit();
+      fitZoom = 1;
+      statedPixels = statedContent();
+      // The document already opened at the fit written into its own css. This
+      // only corrects the width that was guessed for it: the frame's scrollbar
+      // comes off it, and the window may have been resized while it rendered.
+      refit();
       applyZoom();
       zoomBar.hidden = false;
     });
@@ -292,27 +310,54 @@ import { repos } from '../data/links';
     }
   }
 
-  function measureFit() {
-    const doc = frameDocument();
-    const root = doc?.documentElement;
-    if (!root || !currentFrame) return;
-    // Measure unscaled, or each pass would compound the previous one.
-    const previous = root.style.zoom;
-    root.style.zoom = '1';
-    const content = Math.max(root.scrollWidth, doc?.body?.scrollWidth ?? 0);
-    root.style.zoom = previous;
+  /*
+    Rendering for a width makes the renderer fit paged output to it and say so:
+    `--odr-fit` is the factor it applied, and the document's own width follows
+    from the width it was given. It is stated only where the document had to be
+    scaled down - one that already fitted keeps its width to itself, and is
+    measured instead.
+  */
+  function statedContent() {
+    const root = frameDocument()?.documentElement;
+    if (!root || !renderedFor) return null;
+    const fit = parseFloat(getComputedStyle(root).getPropertyValue('--odr-fit'));
+    return fit > 0 && fit < 1 ? renderedFor / fit : null;
+  }
 
-    const available = currentFrame.clientWidth;
-    if (!content || !available) return;
+  function refit() {
+    const doc = frameDocument();
+    const available = doc?.documentElement.clientWidth ?? 0;
+    if (!doc || !available) return;
+
+    let content = statedPixels;
+    if (content === null) {
+      // Measured unscaled, or each pass would compound the previous one, and
+      // each time: what was not fitted may be reflowing to the frame instead,
+      // and then its width is a different number after every resize.
+      showZoom(doc, 1);
+      content = doc.body.scrollWidth;
+      showZoom(doc, userZoom ?? fitZoom);
+    }
+
     // Never enlarge: a document narrower than the frame belongs at its own size.
-    fitZoom = Math.min(1, available / content);
+    fitZoom = content ? Math.min(1, available / content) : 1;
+  }
+
+  /** Writes a scale everywhere the document reads one. */
+  function showZoom(doc: Document, zoom: number) {
+    // The renderer wrote the fit onto `body{zoom}`; overriding that rule keeps
+    // one scale on the document rather than stacking a second one above it.
+    doc.body.style.zoom = String(zoom);
+    // An image view is sized by `max-width` instead, and reads this to grow
+    // past the frame along with the zoom. Inert in every other view.
+    doc.documentElement.style.setProperty('--odr-zoom', String(zoom));
   }
 
   function applyZoom() {
-    const root = frameDocument()?.documentElement;
-    if (!root) return;
+    const doc = frameDocument();
+    if (!doc) return;
     const zoom = userZoom ?? fitZoom;
-    root.style.zoom = String(zoom);
+    showZoom(doc, zoom);
     zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
     zoomOutBtn.disabled = zoom <= ZOOM_MIN;
     zoomInBtn.disabled = zoom >= ZOOM_MAX;
@@ -345,8 +390,14 @@ import { repos } from '../data/links';
     setBusy(`Opening ${name}…`);
     await nextFrame();
 
+    // The frame is not laid out yet - the panel is what is on screen - but it
+    // will take the width of the box that panel sits in.
+    renderedFor = Math.round(demo.clientWidth);
+    const options: Record<string, unknown> = { editable: false };
+    if (renderedFor > 0) options.viewportWidth = renderedFor;
+
     try {
-      currentDoc = odr.open(bytes, { editable: false });
+      currentDoc = odr.open(bytes, options);
     } catch (e) {
       const [msg, detail] = friendlyError(e, name);
       setIdle(msg, detail, true);
@@ -461,7 +512,7 @@ import { repos } from '../data/links';
   zoomOutBtn.addEventListener('click', () => nudgeZoom(1 / ZOOM_STEP));
   zoomLabel.addEventListener('click', () => {
     userZoom = null;
-    measureFit();
+    refit();
     applyZoom();
   });
 
@@ -470,7 +521,7 @@ import { repos } from '../data/links';
   window.addEventListener('resize', () => {
     window.clearTimeout(resizeTimer);
     resizeTimer = window.setTimeout(() => {
-      measureFit();
+      refit();
       if (userZoom === null) applyZoom();
     }, 150);
   });

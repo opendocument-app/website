@@ -54,6 +54,14 @@ Two things about it are deliberate and easy to undo by accident:
 - **It loads on interaction, never on page load.** The wasm is 3.5 MB (1.35 MB
   gzipped), about thirty times the rest of the page put together. The first
   drop, file pick or sample click is what fetches it.
+- **The renderer is told the width it renders for.** `viewportWidth` fits a
+  paged document to the frame and states the factor as `--odr-fit`, so the
+  document opens fitted with no script of ours involved. The zoom bar overrides
+  the `body{zoom}` that carries it. The renderer's own zoom api would do this
+  better, but it is script inside the frame, and the frame runs none: `sandbox`
+  grants `allow-same-origin` (so the bar can reach the document) and withholds
+  `allow-scripts`, which is what keeps a `javascript:` link in a dropped
+  document off this origin.
 
 The sample document is `public/sample.odt`, hand-written for this page.
 
@@ -75,10 +83,12 @@ The workflow needs one repository secret:
 
 JSON has no comments, so the reasoning lives here:
 
-- **`script-src` allows `'unsafe-eval'`.** Not optional: embind builds its
-  invoker functions with `new Function`, so `Odr.load()` throws an `EvalError`
-  without it. It can be tightened to `'wasm-unsafe-eval'` if odr-core is ever
-  built with emscripten's `-sDYNAMIC_EXECUTION=0`.
+- **`script-src` allows `'wasm-unsafe-eval'`.** Compiling the module needs it
+  and nothing more: odr-core is linked with emscripten's
+  `-sDYNAMIC_EXECUTION=0` as of 6.10.0, so embind builds its invokers without
+  `new Function` and the `'unsafe-eval'` this used to carry is gone. It is what
+  refuses the renderer's own inline scripts inside the frame, too — see the
+  demo.
 - **`frame-src blob:`** is what lets a rendered document into its iframe.
 - **`/_astro/**` is immutable for a year** — Astro fingerprints those filenames.
   **`/odr/**` is one day**, because the wasm filename is stable across versions
