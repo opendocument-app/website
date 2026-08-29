@@ -4,8 +4,10 @@ import '../styles/global.css';
 interface Props {
   title: string;
   description: string;
+  /** The full-screen viewer takes the window and scrolls nothing of its own. */
+  bodyClass?: string;
 }
-const { title, description } = Astro.props;
+const { title, description, bodyClass = '' } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site).href;
 const ogImage = new URL('/og.png', Astro.site).href;
 ---
@@ -52,7 +54,7 @@ const ogImage = new URL('/og.png', Astro.site).href;
       })}
     />
   </head>
-  <body class="font-sans antialiased">
+  <body class:list={['font-sans antialiased', bodyClass]}>
     <a
       href="#main"
       class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-primary focus:px-4 focus:py-2 focus:text-on-primary"

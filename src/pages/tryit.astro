@@ -1,0 +1,67 @@
+---
+/*
+  The demo with the chrome taken off: the same viewer, given the whole window.
+  The bar the homepage draws above a document becomes this page's only bar, so
+  there is one row of furniture rather than a site header stacked on a viewer
+  header — the mark on its left is the way back.
+*/
+import Base from '../layouts/Base.astro';
+import Logo from '../components/Logo.astro';
+import Panel from '../components/viewer/Panel.astro';
+import Chrome from '../components/viewer/Chrome.astro';
+---
+
+<Base
+  title="Open a document in your browser — OpenDocument Reader"
+  description="Open ODT, ODS, ODP, DOCX, XLSX, PPTX and PDF files right here. The document is decoded and laid out inside your browser by the same engine the apps use — nothing is uploaded, and it works offline."
+  bodyClass="overflow-hidden"
+>
+  <!-- `dvh`, not `vh`: mobile browser chrome collapses as you scroll, and `vh`
+       is the tall measurement, so the bar would sit under the address bar. -->
+  <div id="viewer" class="flex h-[100dvh] flex-col">
+    <Chrome class="shrink-0 border-b border-outline-variant bg-surface-container px-3 py-2.5 sm:px-4">
+      <a
+        slot="lead"
+        href="/"
+        class="flex shrink-0 items-center gap-2 rounded-lg font-semibold tracking-tight transition-opacity hover:opacity-80"
+      >
+        <Logo class="h-7 w-7" title="OpenDocument Reader" />
+        <span class="hidden text-sm sm:inline">OpenDocument&nbsp;Reader</span>
+      </a>
+      <!-- Divides the mark from the document, so it belongs to the document. -->
+      <span
+        slot="lead"
+        data-viewer-open
+        hidden
+        class="hidden h-5 w-px shrink-0 bg-outline-variant sm:block"
+      ></span>
+    </Chrome>
+
+    <!-- `min-h-0` or the flex item refuses to shrink below the frame's content
+         and the bar is pushed off the top. -->
+    <main id="main" class="min-h-0 flex-1">
+      <Panel class="flex h-full p-4 sm:p-6" zoneClass="h-full w-full" />
+
+      <!-- Shown once something rendered; the frame takes what the bar left. -->
+      <div data-viewer-result hidden class="h-full">
+        <div data-viewer-frame-host class="h-full w-full bg-surface-container"></div>
+      </div>
+    </main>
+  </div>
+</Base>
+
+<script>
+  import { mountViewer } from '../scripts/viewer';
+
+  const root = document.getElementById('viewer');
+  if (root) {
+    mountViewer({
+      root,
+      // Nothing to scroll to: the viewer is the page.
+      // A whole window is room enough to show a text document as the pages it
+      // was written as, which is what the apps do and what a reader expects of
+      // something calling itself full screen.
+      textDocumentMargin: true,
+    });
+  }
+</script>

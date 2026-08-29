@@ -23,13 +23,24 @@ npm run preview  # serve dist/
 Node **22.12+** (Astro 7). `.nvmrc` pins it; `nvm use` picks it up, and CI reads
 the same file.
 
+**The viewer only works under `preview`, not `dev`.** The renderer is imported
+from `public/odr/` at runtime, and Vite's dev server refuses to serve a
+`public/` file through its module pipeline — it rewrites the import to
+`/odr/index.js?import` and answers 500, so the demo reports that the renderer
+could not be loaded. `@vite-ignore` does not help; the query is injected at
+runtime, after the comment has done its job. Everything else on the page is
+fine in `dev`; check the viewer with `npm run build && npm run preview`.
+
 ## What is where
 
 | Path | |
 |---|---|
 | `src/pages/index.astro` | the single page — composes the sections below |
 | `src/pages/privacy.astro` | the privacy policy, carried over verbatim from the author's blog |
-| `src/components/Demo.astro` | the drag-and-drop viewer, markup and script |
+| `src/pages/tryit.astro` | the viewer with the whole window to itself |
+| `src/scripts/viewer.ts` | the viewer itself — one implementation, mounted by both |
+| `src/components/viewer/` | the markup those two share: the idle panel and the bar |
+| `src/components/Demo.astro` | the viewer as one section of the homepage |
 | `src/components/StoreBadge.astro` | official Play / App Store / F-Droid / Obtainium artwork, aligned |
 | `src/data/links.ts` | every outbound URL, in one place |
 | `src/styles/global.css` | the design tokens |
@@ -86,6 +97,55 @@ Two things about it are deliberate and easy to undo by accident:
   does not.
 
 The sample document is `public/sample.odt`, hand-written for this page.
+
+### Two mounts, one viewer
+
+`src/scripts/viewer.ts` is the whole thing; `Demo.astro` and `tryit.astro` are
+two sets of markup around it, found by `data-viewer-*` attributes so a layout
+can leave a control out rather than having to carry it. One viewer per page:
+the drop target is the window, so a second mount would open the same file
+twice.
+
+They differ in two deliberate ways:
+
+- **`/tryit` asks for `textDocumentMargin`.** A text document then comes out as
+  the fixed-size pages it was written as, on the renderer's own canvas, instead
+  of reflowing to the frame. That is the right trade only where there is room —
+  the demo's 32rem box would spend most of it on margins, so the demo leaves it
+  off and gets reflowed text.
+- **`/tryit` has no site header.** The bar the demo draws above a document is
+  the page's only furniture, with the mark on its left as the way back. So the
+  document half of that bar carries `data-viewer-open` and is toggled with the
+  frame; inside the demo, where the whole bar is hidden until something
+  renders, that costs nothing.
+
+The full-screen page starts empty on purpose: a navigation drops the wasm heap
+the document lives in, so the link out of the demo cannot carry it over and
+says so in its `title`.
+
+### The frame is given the colour its document chose
+
+The renderer paints its canvas on the document's `body` — white behind
+reflowing text, `#525659` behind paginated pages — and a body background
+normally propagates to the frame's canvas, which is what a rubber-band scroll
+past either end paints. It stops propagating the moment the zoom bar writes
+`zoom` onto that same body, and the overscroll then revealed the frame host's
+own light `bg-surface-container` behind a dark page canvas. The `load` handler
+copies the body's computed background onto the `iframe` element — on the
+element rather than the document's root, so what is shown stays exactly as the
+renderer wrote it.
+
+### Editing is not wired up, and cannot be from here
+
+`odr.fileTypes()` reports `edit` and `save` for odt, odp, odg and docx, and
+rendering with `editable: true` really does come back `contenteditable` with a
+`data-odr-path` per run. There is still no way to write those edits back into
+the file: the wasm bindings expose `open`, `renderView`, `readPath`, `meta`,
+`capabilities`, `decrypt`, `listViews`, `detect` and `close`, and neither
+`html::edit` nor `Document::save` — which the jni, apple, python and cli
+bindings all have. Until they are bound, a save button here could only offer
+the rendered html, which is not the document anyone came with. Tracked as
+[OpenDocument.core#777](https://github.com/opendocument-app/OpenDocument.core/issues/777).
 
 ## Deployment
 
