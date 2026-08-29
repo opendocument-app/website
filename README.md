@@ -39,7 +39,7 @@ the same file.
 
 [`@opendocument/odr-core`](https://www.npmjs.com/package/@opendocument/odr-core)
 is the C++ engine compiled to WebAssembly. A dropped document is decoded and
-laid out in the browser and shown in a sandboxed `blob:` iframe. Nothing is
+laid out in the browser and shown in a sandboxed `srcdoc` iframe. Nothing is
 uploaded — the page's `connect-src 'self'` makes that checkable in devtools
 rather than merely claimed.
 
@@ -62,6 +62,19 @@ Two things about it are deliberate and easy to undo by accident:
   grants `allow-same-origin` (so the bar can reach the document) and withholds
   `allow-scripts`, which is what keeps a `javascript:` link in a dropped
   document off this origin.
+- **A sheet is capped at 50,000 cells.** The markup goes into `srcdoc` as one
+  string, so a sheet costs this page's memory rather than a stream the browser
+  can page through, and a styled ODS runs ~226 bytes a cell — core's own
+  500,000-cell default is ~108 MB for one sheet. At 50,000 the worst sheet in
+  the test corpus is 10.8 MB and about fourteen seconds in a browser, and an
+  ordinary 40,000-cell XLSX is untouched and opens in well under a second.
+  `sheetCut` says what was left out, and the demo says so above the frame. The
+  apps have no such cap.
+- **A format with no signature is asked for by name.** Everything else core
+  detects from the bytes. Markdown is the exception — a `.md` is text and reads
+  as text — so the demo maps the extension to the type for any format whose
+  `detectByContent` is false and which renders. Hard-coding `md` would rot; this
+  does not.
 
 The sample document is `public/sample.odt`, hand-written for this page.
 
@@ -89,7 +102,10 @@ JSON has no comments, so the reasoning lives here:
   `new Function` and the `'unsafe-eval'` this used to carry is gone. It is what
   refuses the renderer's own inline scripts inside the frame, too — see the
   demo.
-- **`frame-src blob:`** is what lets a rendered document into its iframe.
+- **`frame-src blob:`** is left over from the `blob:` URL the demo used to
+  mount a document with; it goes in through `srcdoc` now, which needs nothing
+  from this directive. Harmless, and untested to remove — the demo is what
+  would tell you.
 - **`/_astro/**` is immutable for a year** — Astro fingerprints those filenames.
   **`/odr/**` is one day**, because the wasm filename is stable across versions
   and pinning it forever would strand an old renderer in caches.
@@ -99,7 +115,7 @@ JSON has no comments, so the reasoning lives here:
 
 ## Content
 
-The copy descends from the store listings. Two details worth keeping straight:
+The copy descends from the store listings. Three details worth keeping straight:
 
 - The store identifiers do not line up across platforms —
   `at.tomtasche.reader` is the **free** app on Android and the **paid** app on
@@ -107,6 +123,12 @@ The copy descends from the store listings. Two details worth keeping straight:
   platform, never by recognising an id.
 - The download buttons point at the **free** edition on both platforms. The old
   site linked the paid iOS listing instead.
+- **The format list is the engine's, not the store's.** The store listing claims
+  EPS, DXF, PSD and HTML; core has no type for the first three at all, and as of
+  6.11.0 it stops claiming HTML output for PSD — the `<img>` never painted, so
+  the app showed a blank page. `Formats.astro` lists what
+  `odr.fileTypes()` says renders. When they disagree, the store listing is the
+  one to fix.
 
 ## Design
 

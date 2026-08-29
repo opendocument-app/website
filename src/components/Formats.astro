@@ -16,10 +16,15 @@ const groups = [
     title: 'Microsoft Office',
     items: ['DOC', 'DOCX', 'XLS', 'XLSX', 'PPT', 'PPTX'],
   },
-  { title: 'PDF and plain formats', items: ['PDF', 'RTF', 'TXT', 'CSV', 'HTML'] },
+  {
+    title: 'Apple iWork',
+    items: ['PAGES', 'NUMBERS', 'KEY'],
+    note: 'Text, tables and slide contents so far — not yet the styling around them.',
+  },
+  { title: 'PDF and plain formats', items: ['PDF', 'RTF', 'TXT', 'MD', 'CSV'] },
   { title: 'Images', items: ['JPG', 'PNG', 'GIF', 'WEBP', 'TIFF', 'BMP', 'SVG'] },
   { title: 'Media', items: ['MP4', 'WEBM', 'MP3', 'OGG'] },
-  { title: 'And the awkward ones', items: ['ZIP', 'EPS', 'DXF', 'PSD'] },
+  { title: 'And the awkward ones', items: ['ZIP', 'XML', 'SVM'] },
 ] as const;
 
 const tones = {
@@ -67,6 +72,7 @@ const tones = {
                 </li>
               ))}
             </ul>
+            {'note' in g && <p class="mt-2 text-xs leading-relaxed text-on-surface-variant">{g.note}</p>}
           </div>
         ))
       }
@@ -75,7 +81,9 @@ const tones = {
     <p class="mt-10 max-w-2xl text-sm leading-relaxed text-on-surface-variant">
       ODF is also the format behind NeoOffice, StarOffice, Collabora, OnlyOffice,
       IBM Lotus Symphony, WPS Office, AndrOpen Office and a long tail of others —
-      if a suite exports ODT, ODS or ODP, this opens it.
+      if a suite exports ODT, ODS or ODP, this opens it. So are the single-file
+      flavours a suite offers as "flat XML", FODT, FODS, FODP and FODG, and the
+      templates: OTT, OTS, OTP and OTG.
     </p>
   </div>
 </section>

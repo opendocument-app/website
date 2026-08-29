@@ -105,6 +105,13 @@ import { repos } from '../data/links';
             <span class="sm:hidden">Close</span>
           </button>
         </div>
+        <!-- Only ever shown for a sheet the cell budget cut; see the script. -->
+        <p
+          id="demo-cut"
+          hidden
+          class="border-b border-outline-variant bg-surface-variant/40 px-4 py-2 text-xs leading-relaxed text-on-surface-variant"
+        >
+        </p>
         <!-- The frame is created per document rather than reused; see the
              script for why. -->
         <div id="demo-frame-host" class="h-[32rem] w-full bg-surface-container"></div>
@@ -152,6 +159,7 @@ import { repos } from '../data/links';
   const zoomOutBtn = document.getElementById('demo-zoom-out') as HTMLButtonElement;
   const zoomInBtn = document.getElementById('demo-zoom-in') as HTMLButtonElement;
   const zoomLabel = document.getElementById('demo-zoom-level') as HTMLButtonElement;
+  const cutNote = document.getElementById('demo-cut') as HTMLElement;
 
   const DROP_ACTIVE = ['border-primary', 'bg-primary-container/30'];
 
@@ -161,6 +169,23 @@ import { repos } from '../data/links';
   const IDLE_TITLE = CAN_DROP ? 'Drop a document here' : 'Open a document';
   const IDLE_HINT =
     'ODT, ODS, ODP, DOCX, XLSX, PPTX, PDF and more \u2014 it stays on your device';
+
+  /*
+    A sheet is written into `srcdoc` as one string, so its markup is this page's
+    memory rather than a file the browser streams, and the frame parses all of
+    it before anything paints. Core's own budget is 500k cells, which a styled
+    ods spends at ~226 bytes each: ~108 MB for one sheet.
+
+    50k is not a byte figure - a cell ranges from ~44 bytes in a csv to ~226 in
+    a styled ods - but it is where the two cases we have both land well. An
+    ordinary 40k-cell xlsx stays uncut and opens in under a second, and the
+    worst sheet in the test corpus (66523x21, the business register) comes out
+    at 10.8 MB and ~14s in a browser instead of 108 MB and probably never.
+    Lowering it to 20k would halve that wait and start cutting the ordinary
+    xlsx, which is the wrong trade for a demo. `sheetCut` is what tells the
+    visitor the rest of the sheet is still there.
+  */
+  const SHEET_CELL_BUDGET = 50000;
 
   const ZOOM_MIN = 0.25;
   const ZOOM_MAX = 4;
@@ -179,6 +204,29 @@ import { repos } from '../data/links';
 
   let odrPromise: Promise<any> | null = null;
   let currentDoc: any = null;
+
+  /*
+    Core detects every format it ships from the bytes, with one exception: a
+    format that carries no signature can only be asked for by name. Markdown is
+    the one today - a `.md` is text, and reads as text, so nothing in the file
+    says it wants the prose treatment. Keyed off the capability rather than a
+    hard-coded `md` so it stays true as the engine gains and loses types, and
+    narrowed to types that render: asking for one that cannot is how you turn a
+    file that opened as plain text into one that does not open at all.
+  */
+  let askable: Map<string, number> | null = null;
+
+  function askedType(odr: any, name: string): number | undefined {
+    if (!askable) {
+      askable = new Map();
+      for (const t of odr.fileTypes()) {
+        if (t.capabilities?.detectByContent || !t.capabilities?.translateHtml) continue;
+        for (const ext of t.extensions ?? []) askable.set(ext.toLowerCase(), t.fileType);
+      }
+    }
+    const dot = name.lastIndexOf('.');
+    return dot < 0 ? undefined : askable.get(name.slice(dot + 1).toLowerCase());
+  }
 
   function loadOdr() {
     if (!odrPromise) {
@@ -246,12 +294,40 @@ import { repos } from '../data/links';
     }
   }
 
+  /*
+    A sheet bigger than the budget is written short, and `sheetCut` is the only
+    thing that says so - the `<table>` just ends. Saying which way it was cut
+    beats a vague "some rows are missing", and the apps have no such budget, so
+    the honest sentence is also the one that sells them.
+  */
+  function showCut(cut: any) {
+    if (!cut) {
+      cutNote.hidden = true;
+      return;
+    }
+    const n = (value: number) => value.toLocaleString();
+    const parts: string[] = [];
+    if (cut.renderedRows < cut.contentRows) {
+      parts.push(`the first ${n(cut.renderedRows)} of ${n(cut.contentRows)} rows`);
+    }
+    if (cut.renderedColumns < cut.contentColumns) {
+      parts.push(`the first ${n(cut.renderedColumns)} of ${n(cut.contentColumns)} columns`);
+    }
+    if (!parts.length) {
+      cutNote.hidden = true;
+      return;
+    }
+    cutNote.textContent = `This preview keeps ${parts.join(' and ')} — the demo caps how much of a sheet it builds in one page. The apps open the whole thing.`;
+    cutNote.hidden = false;
+  }
+
   function teardown() {
     currentDoc?.close();
     currentDoc = null;
     frameHost.replaceChildren();
     currentFrame = null;
     zoomBar.hidden = true;
+    cutNote.hidden = true;
   }
 
   /*
@@ -268,9 +344,9 @@ import { repos } from '../data/links';
     what a phone saw here. `srcdoc` also removes the object-URL lifecycle, so
     there is no revoke to get wrong.
 
-    `sandbox` deliberately omits `allow-same-origin`: the document gets an
-    opaque origin, so its own scripts run but it cannot reach this page. With
-    `embedImages` on, the markup is self-contained and needs nothing fetched.
+    With `embedImages` on, the markup is self-contained and needs nothing
+    fetched, so the frame reaches no origin at all. What `sandbox` grants it is
+    the comment on the attribute below.
   */
   function mountFrame(html: string) {
     const frame = document.createElement('iframe');
@@ -393,8 +469,13 @@ import { repos } from '../data/links';
     // The frame is not laid out yet - the panel is what is on screen - but it
     // will take the width of the box that panel sits in.
     renderedFor = Math.round(demo.clientWidth);
-    const options: Record<string, unknown> = { editable: false };
+    const options: Record<string, unknown> = {
+      editable: false,
+      spreadsheetCellLimit: SHEET_CELL_BUDGET,
+    };
     if (renderedFor > 0) options.viewportWidth = renderedFor;
+    const asked = askedType(odr, name);
+    if (asked !== undefined) options.fileType = asked;
 
     try {
       currentDoc = odr.open(bytes, options);
@@ -413,6 +494,12 @@ import { repos } from '../data/links';
       );
       return;
     }
+
+    // Instant on anything that is not a huge sheet, and on one that is (~2.2s
+    // for the business register) it is work `render` does anyway and caches -
+    // asking first costs ~10% of the total, and buys saying so before the wait
+    // rather than after. Absent on an older renderer, which reads as no cut.
+    showCut(currentDoc.listViews()[0]?.sheetCut);
 
     setBusy(`Rendering ${name}…`);
     await nextFrame();
