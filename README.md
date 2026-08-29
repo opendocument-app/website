@@ -70,6 +70,15 @@ Two things about it are deliberate and easy to undo by accident:
   ordinary 40,000-cell XLSX is untouched and opens in well under a second.
   `sheetCut` says what was left out, and the demo says so above the frame. The
   apps have no such cap.
+- **Links in the frame are rewired from here.** 6.11.0 dropped the blanket
+  `<base target="_blank">`, which is right for a host that serves what it
+  rendered and wrong for this one. A `srcdoc` document resolves urls against
+  *this page*, so a PDF's `#p2` pointed at `https://opendocument.app/#p2` and a
+  click replaced the document with the homepage; an archive entry's relative
+  link went to our 404. Fragments now scroll the frame from the parent — the
+  document is same-origin, the same access the zoom bar needs — and relative
+  links are drawn as text. External links keep `target="_blank"` and stay inert
+  against the missing `allow-popups`.
 - **A format with no signature is asked for by name.** Everything else core
   detects from the bytes. Markdown is the exception — a `.md` is text and reads
   as text — so the demo maps the extension to the type for any format whose

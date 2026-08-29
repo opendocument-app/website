@@ -363,6 +363,8 @@ import { repos } from '../data/links';
     frame.className = 'h-full w-full border-0';
     frame.addEventListener('load', () => {
       currentFrame = frame;
+      const doc = frame.contentDocument;
+      if (doc) defuseLinks(doc);
       userZoom = null;
       fitZoom = 1;
       statedPixels = statedContent();
@@ -375,6 +377,56 @@ import { repos } from '../data/links';
     });
     frameHost.replaceChildren(frame);
     frame.srcdoc = html;
+  }
+
+  /*
+    6.11.0 dropped the blanket `<base target="_blank">`, so the renderer now
+    tells three kinds of link apart: one that leaves the page carries
+    `target="_blank"`, one back into what serves the page carries nothing and
+    navigates in place, and one whose scheme is refused carries no `href` at
+    all. That is right for a host that serves what it rendered - it is what
+    makes an archive listing's entries work - and this demo is not one. There
+    is a single `srcdoc` document and no route behind `a.txt`, so a click on an
+    archive entry used to be swallowed by the missing `allow-popups` and now
+    navigates the frame onto our own 404.
+
+    So the relative ones are drawn as what they are here: named, not openable.
+    External ones are left alone, still inert against the missing
+    `allow-popups`; granting it so a dropped document could open tabs is not a
+    trade this page should make.
+
+    A fragment needs the opposite treatment. `srcdoc` resolves urls against
+    *this* page, not the frame's own document, so a pdf's `#p2` points at
+    `https://opendocument.app/#p2` and a click on the contents page replaces
+    the document with our homepage. Stripping the href and scrolling from here
+    is what the link meant: the frame runs no script, but this document is
+    same-origin, so the handler runs in our realm and reaches into it - the
+    same access the zoom bar already needs. A pdf's contents page therefore
+    works here for the first time.
+  */
+  function defuseLinks(doc: Document) {
+    for (const a of doc.querySelectorAll<HTMLAnchorElement>('a[href]')) {
+      const href = a.getAttribute('href');
+      if (!href) continue;
+
+      if (href.startsWith('#')) {
+        a.removeAttribute('href');
+        a.style.cursor = 'pointer';
+        a.addEventListener('click', (event) => {
+          event.preventDefault();
+          // `smooth` is dropped on the floor in this frame - the animation wants
+          // a user activation in the frame's own realm, and the click arrives
+          // in ours. A page anchor is a jump anyway.
+          doc.getElementById(href.slice(1))?.scrollIntoView({ behavior: 'instant', block: 'start' });
+        });
+        continue;
+      }
+
+      if (a.target === '_blank') continue;
+      a.removeAttribute('href');
+      a.title = 'This demo renders one document. Opening what it links to is what the apps do.';
+      a.style.cursor = 'default';
+    }
   }
 
   /* The frame is same-origin, so the document can be measured from here. */
