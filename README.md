@@ -30,7 +30,7 @@ the same file.
 | `src/pages/index.astro` | the single page — composes the sections below |
 | `src/pages/privacy.astro` | the privacy policy, carried over verbatim from the author's blog |
 | `src/components/Demo.astro` | the drag-and-drop viewer, markup and script |
-| `src/components/StoreBadge.astro` | official Play / App Store / F-Droid artwork, aligned |
+| `src/components/StoreBadge.astro` | official Play / App Store / F-Droid / Obtainium artwork, aligned |
 | `src/data/links.ts` | every outbound URL, in one place |
 | `src/styles/global.css` | the design tokens |
 | `scripts/sync-odr.mjs` | vendors the wasm renderer into `public/odr/` |

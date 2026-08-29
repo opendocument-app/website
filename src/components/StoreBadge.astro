@@ -1,9 +1,11 @@
 ---
 /*
-  Official store artwork, self-hosted. The three assets do not share a geometry:
-  Google's and F-Droid's PNGs carry the mandated clear space *inside* the image
-  — a 41px border on all four sides of a 646x250 frame, so the button is 67.2%
-  of the frame's height — while Apple's SVG is the button and nothing else.
+  Official store artwork, self-hosted. The four assets do not share a geometry:
+  Google's, F-Droid's and Obtainium's PNGs carry the mandated clear space
+  *inside* the image — a 41px border on all four sides of a 646x250 frame, so
+  the button is 67.2% of the frame's height — while Apple's SVG is the button
+  and nothing else. Obtainium's badge is drawn to Google's template deliberately,
+  which is why it needs no case of its own.
   Sizing them all to the same *frame* would make Apple's look a third too big
   and, stacked in a column, would indent the two PNGs past it. So each is scaled
   to a common button height and the baked-in clear space is pulled back out; the
@@ -15,7 +17,7 @@
   set height stays put, and squashing the badge.
 */
 interface Props {
-  store: 'play' | 'appstore' | 'fdroid';
+  store: 'play' | 'appstore' | 'fdroid' | 'obtainium';
   href: string;
   /** Rendered height of the button itself, clear space excluded. */
   height?: number;
@@ -43,6 +45,12 @@ const assets = {
   fdroid: {
     src: '/badges/fdroid.png',
     alt: 'Get it on F-Droid',
+    ratio: 646 / 250,
+    padded: true,
+  },
+  obtainium: {
+    src: '/badges/obtainium.png',
+    alt: 'Get it on Obtainium',
     ratio: 646 / 250,
     padded: true,
   },

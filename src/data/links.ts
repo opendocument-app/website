@@ -21,6 +21,17 @@ export const stores = {
     paid: 'https://apps.apple.com/app/id1452061743',
   },
   fdroid: 'https://f-droid.org/packages/at.tomtasche.reader',
+  /*
+    Obtainium installs from the GitHub release rather than a store, so this is
+    not a listing url but the app's whole configuration, url-encoded: the
+    package id, the repository to track, and the name to show. Wrapped in
+    apps.obtainium.imranr.dev/redirect so a visitor without Obtainium gets a
+    working "get it" page instead of a dead obtainium:// link. The id is the
+    foss build's, `at.tomtasche.reader.foss` — a different app from the two
+    above, and deliberately so; see the droid repo's readme.
+  */
+  obtainium:
+    'https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22at.tomtasche.reader.foss%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Fopendocument-app%2FOpenDocument.droid%22%2C%22author%22%3A%22opendocument-app%22%2C%22name%22%3A%22OpenDocument%20Reader%22%7D',
 } as const;
 
 /** What the download buttons point at. Both platforms show the free edition. */
@@ -28,6 +39,7 @@ export const primary = {
   android: stores.android.free,
   ios: stores.ios.free,
   fdroid: stores.fdroid,
+  obtainium: stores.obtainium,
 } as const;
 
 export const packages = {
