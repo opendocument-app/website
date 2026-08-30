@@ -395,6 +395,27 @@ export function mountViewer({
   }
 
   /*
+    `isEditable`/`isSavable` are 6.12.0 bindings, and a renderer older than the
+    page is not the only way to be without them: `/odr/` served the wrapper, the
+    glue and the wasm under one path until 6.12.0, and those are three cache
+    entries on their own clocks. A visitor can therefore hold a 6.11.0 wasm
+    under a 6.12.0 wrapper, where the method is on the object and the module
+    behind it has nothing to call - a `TypeError`, not an answer. Asking is the
+    only way to find out, so the question is asked in a net.
+
+    Either way the reply is the same, and it is not an error: this renderer does
+    not edit. Everything else about it still works, so the document opens as it
+    always did, without a pen.
+  */
+  function canEdit(doc: any) {
+    try {
+      return doc.isEditable?.() === true && doc.isSavable?.() === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /*
     A save is a download: there is no file behind the document, only the bytes
     that were dropped on the page. It is written under the name it was opened
     as, so a browser that still has the original puts this one beside it - the
@@ -742,14 +763,10 @@ export function mountViewer({
       return;
     }
 
-    /* `capabilities()` answers for the format, these two for the document that
-       was actually opened - a text file the engine renders read-only answers no
-       here and yes there. Both absent on a renderer older than 6.12.0, which
-       reads as a document without a pen. */
-    editable =
-      editableFormat &&
-      currentDoc.isEditable?.() === true &&
-      currentDoc.isSavable?.() === true;
+    // `capabilities()` answers for the format, `canEdit` for the document that
+    // was actually opened - a text file the engine renders read-only answers no
+    // there and yes here.
+    editable = editableFormat && canEdit(currentDoc);
     paintEdit();
 
     // Instant on anything that is not a huge sheet, and on one that is (~2.2s
@@ -781,12 +798,38 @@ export function mountViewer({
     mountFrame(html);
   }
 
+  /*
+    `open` reports what it knows how to fail at - a format it will not open, a
+    password, a render that gave up - and leaves anything else to throw. What
+    used to catch that was whoever called it: nothing, on a dropped file, which
+    left the panel on `Reading…` for good, and the sample's own handler, which
+    called every failure a fetch that did not arrive. Both were wrong about a
+    renderer that is not quite the one this page was built against, which is a
+    state a visitor can be left in for a day.
+
+    So there is one net, and it says the true thing: this document did not open,
+    here is why, and the panel is back.
+  */
+  async function openSafely(bytes: Uint8Array, name: string) {
+    try {
+      await open(bytes, name);
+    } catch (e: any) {
+      teardown();
+      showResult(false);
+      setIdle(
+        `${name} could not be opened`,
+        e?.message ? String(e.message) : 'Something went wrong inside the viewer.',
+        true,
+      );
+    }
+  }
+
   async function openFile(file: File) {
     if (wouldDiscard()) return;
     scrollTarget?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     showResult(false);
     setBusy(`Reading ${file.name}…`);
-    await open(new Uint8Array(await file.arrayBuffer()), file.name);
+    await openSafely(new Uint8Array(await file.arrayBuffer()), file.name);
   }
 
   pickBtn.addEventListener('click', () => fileInput.click());
@@ -799,13 +842,21 @@ export function mountViewer({
   sampleBtn.addEventListener('click', async () => {
     if (wouldDiscard()) return;
     setBusy('Fetching the sample…');
+
+    // Only the fetch is inside this: opening the bytes can fail for reasons
+    // that have nothing to do with the network, and saying "could not be
+    // fetched" about one of those sends the visitor to look at their wifi.
+    let bytes: Uint8Array;
     try {
       const response = await fetch('/sample.odt');
       if (!response.ok) throw new Error(String(response.status));
-      await open(new Uint8Array(await response.arrayBuffer()), 'sample.odt');
+      bytes = new Uint8Array(await response.arrayBuffer());
     } catch {
       setIdle('The sample could not be fetched', 'Check your connection and try again.', true);
+      return;
     }
+
+    await openSafely(bytes, 'sample.odt');
   });
 
   resetBtn.addEventListener('click', () => {

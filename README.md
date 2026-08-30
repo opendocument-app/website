@@ -65,7 +65,9 @@ Two things about it are deliberate and easy to undo by accident:
   bundler; that resolution is also why the version is a *directory* rather than
   a query string, which the glue would not carry to its siblings.
   `public/odr/` is generated, so it is gitignored — npm is the source of truth
-  for the version.
+  for the version. **One version is ever on the site**: `/odr/index.js` is a
+  generated forwarder to it, for html cached from before a release, and there
+  is no second copy of anything to be half loaded from.
 - **It loads on interaction, never on page load.** The wasm is 3.5 MB (1.35 MB
   gzipped), about thirty times the rest of the page put together. The first
   drop, file pick or sample click is what fetches it.
@@ -210,12 +212,17 @@ JSON has no comments, so the reasoning lives here:
 - **`/_astro/**` is immutable for a year** — Astro fingerprints those filenames.
   **`/odr/<version>/**` is immutable for a year too**, because the version is in
   the path. It used to be one stable path cached for a day, which cost 6.12.0's
-  save buttons their first day on the site: the page had them and the renderer
-  the browser kept did not. Worse, the three files expire on their own clocks,
-  so a half-refreshed cache could pair new glue with an old wasm — an exception
-  rather than an old renderer. **`/odr/*` stays at one day**: it is the copy at
-  the pre-6.12.0 path, kept so html cached from before this change still opens
-  a document. Both it and that rule go one release later.
+  save buttons their first day on the site — the page had them and the renderer
+  the browser kept did not — and then broke opening a document altogether, when
+  a refreshed wrapper met the wasm still in cache and called a binding that was
+  not there. Three files under one path are three cache entries on their own
+  clocks; a version per directory is the only thing all three inherit. A `?v=`
+  would not do it: the glue resolves its siblings from `import.meta.url`, and a
+  relative resolution drops the query, so the wasm would still come from the
+  old entry.
+- **`/odr/index.js` is `no-store`.** It is the generated forwarder to the
+  current version — two `export` lines, no renderer of its own — and a cached
+  copy of it could pin a version, which is the whole thing being avoided.
 - **`/app-ads.txt`** is served as plain text and cached for an hour. It carries
   the AdMob publisher line (`pub-8161473686436957`) and must stay reachable at
   the domain root, or ad revenue on the free apps breaks. It is not decoration.
