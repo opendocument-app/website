@@ -15,8 +15,14 @@
   rather than bundled - the emscripten glue resolves its `.wasm` sibling from
   `import.meta.url`, which survives being copied into `public/` untouched but
   not being run through a bundler.
+
+  Under the version, because that same sibling resolution is what makes one
+  stable path dangerous: the three files are three cache entries on their own
+  clocks, and a visitor holding yesterday's glue beside today's wasm is a
+  broken renderer rather than an old one. A versioned directory is a set of
+  urls nothing has cached, so a release lands with the page that names it.
 */
-const ODR_ENTRY = '/odr/index.js';
+const ODR_ENTRY = `/odr/${__ODR_VERSION__}/index.js`;
 
 /*
   A sheet is written into `srcdoc` as one string, so its markup is this page's

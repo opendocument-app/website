@@ -56,12 +56,16 @@ rather than merely claimed.
 
 Two things about it are deliberate and easy to undo by accident:
 
-- **The renderer is not bundled.** `prebuild` copies `index.js`,
-  `odr-core.mjs` and `odr-core.wasm` into `public/odr/`, and the page imports
-  `/odr/index.js` at runtime. The emscripten glue locates its `.wasm` sibling
-  through `import.meta.url`, which survives being copied but not being passed
-  through a bundler. `public/odr/` is generated, so it is gitignored — npm is
-  the source of truth for the version.
+- **The renderer is not bundled, and its path carries its version.**
+  `prebuild` copies `index.js`, `odr-core.mjs` and `odr-core.wasm` into
+  `public/odr/<version>/`, and the page imports `/odr/<version>/index.js` at
+  runtime — `astro.config.mjs` reads the same manifest and defines the version
+  into the bundle. The emscripten glue locates its `.wasm` sibling through
+  `import.meta.url`, which survives being copied but not being passed through a
+  bundler; that resolution is also why the version is a *directory* rather than
+  a query string, which the glue would not carry to its siblings.
+  `public/odr/` is generated, so it is gitignored — npm is the source of truth
+  for the version.
 - **It loads on interaction, never on page load.** The wasm is 3.5 MB (1.35 MB
   gzipped), about thirty times the rest of the page put together. The first
   drop, file pick or sample click is what fetches it.
@@ -204,8 +208,14 @@ JSON has no comments, so the reasoning lives here:
   from this directive. Harmless, and untested to remove — the demo is what
   would tell you.
 - **`/_astro/**` is immutable for a year** — Astro fingerprints those filenames.
-  **`/odr/**` is one day**, because the wasm filename is stable across versions
-  and pinning it forever would strand an old renderer in caches.
+  **`/odr/<version>/**` is immutable for a year too**, because the version is in
+  the path. It used to be one stable path cached for a day, which cost 6.12.0's
+  save buttons their first day on the site: the page had them and the renderer
+  the browser kept did not. Worse, the three files expire on their own clocks,
+  so a half-refreshed cache could pair new glue with an old wasm — an exception
+  rather than an old renderer. **`/odr/*` stays at one day**: it is the copy at
+  the pre-6.12.0 path, kept so html cached from before this change still opens
+  a document. Both it and that rule go one release later.
 - **`/app-ads.txt`** is served as plain text and cached for an hour. It carries
   the AdMob publisher line (`pub-8161473686436957`) and must stay reachable at
   the domain root, or ad revenue on the free apps breaks. It is not decoration.
