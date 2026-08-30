@@ -76,6 +76,31 @@ function loadOdr() {
 */
 let askable: Map<string, number> | null = null;
 
+/* Every type the engine knows, by ordinal: what it can do, and what to call the
+   bytes when one is handed back as a download. */
+let types: Map<number, any> | null = null;
+
+function typeInfo(odr: any, fileType: number | undefined) {
+  if (fileType === undefined) return undefined;
+  if (!types) {
+    types = new Map();
+    for (const t of odr.fileTypes()) types.set(t.fileType, t);
+  }
+  return types.get(fileType);
+}
+
+/* Only to look the type up, never to force it: `open` detects for itself, and
+   what it settles on is its business. A file it cannot place at all is not our
+   problem here either - `open` says so in a moment, with a better message. */
+function detectedType(odr: any, bytes: Uint8Array): number | undefined {
+  try {
+    const found = odr.detect(bytes).fileTypes;
+    return found[found.length - 1];
+  } catch {
+    return undefined;
+  }
+}
+
 function askedType(odr: any, name: string): number | undefined {
   if (!askable) {
     askable = new Map();
@@ -136,6 +161,10 @@ export function mountViewer({
   const zoomInBtn = need<HTMLButtonElement>('zoom-in');
   const zoomLabel = need<HTMLButtonElement>('zoom-level');
   const cutNote = need('cut');
+  const alertNote = need('alert');
+  const editBtn = need<HTMLButtonElement>('edit');
+  const penIcon = need('edit-pen');
+  const discIcon = need('edit-disc');
   /* Everything about the open document. Inside the hidden box on the demo, and
      the right-hand half of the page's only bar on `/tryit`, which has to empty
      itself when the document goes. */
@@ -156,6 +185,25 @@ export function mountViewer({
   let userZoom: number | null = null;
 
   let currentDoc: any = null;
+  /** What to call the bytes a save hands back; the type the document opened as. */
+  let currentMime = 'application/octet-stream';
+
+  /** Whether the markup in the frame was rendered editable, which is what the
+      `contenteditable` the frame mounts with has to be turned off again. */
+  let renderedEditable = false;
+  /** Whether this document can be edited *and* written back out. Both, because
+      an edit nobody can save is a promise the demo cannot keep. Narrower than
+      `renderedEditable`: the format's answer, then the document's. */
+  let editable = false;
+  /** Whether the pen has been pressed and not yet answered by the disc. */
+  let editing = false;
+  /** The diff being collected: the path the renderer wrote against the element
+      that carries it, whose text is read when the disc is pressed. */
+  const edited = new Map<string, HTMLElement>();
+  let editWatcher: MutationObserver | null = null;
+  /** Set once edits nobody saved have been reported, so the second attempt at
+      whatever would drop them goes through. */
+  let discardArmed = false;
 
   /** Swaps the page between the idle panel and a mounted document. */
   function showResult(on: boolean) {
@@ -244,7 +292,181 @@ export function mountViewer({
     cutNote.hidden = false;
   }
 
+  /* What went wrong with an edit, and the one warning before unsaved edits are
+     thrown away. Everything else the viewer has to say it says on the idle
+     panel, which is not on screen while a document is. */
+  function showAlert(message: string | null) {
+    alertNote.textContent = message ?? '';
+    alertNote.hidden = !message;
+  }
+
+  function paintEdit() {
+    editBtn.hidden = !editable;
+    penIcon.hidden = editing;
+    discIcon.hidden = !editing;
+    const label = editing
+      ? 'Save this document with your changes'
+      : 'Edit the text in this document';
+    editBtn.title = label;
+    editBtn.setAttribute('aria-label', label);
+    editBtn.setAttribute('aria-pressed', String(editing));
+    /* Filled while it is a mode rather than a way into one: the frame below is
+       taking typing, and the bar should say so without a word. */
+    editBtn.classList.toggle('bg-primary', editing);
+    editBtn.classList.toggle('text-on-primary', editing);
+    editBtn.classList.toggle('border-transparent', editing);
+    editBtn.classList.toggle('border-outline', !editing);
+    editBtn.classList.toggle('hover:bg-surface', !editing);
+  }
+
+  /*
+    Asked for editable output, the renderer writes `contenteditable="true"` onto
+    every text run it will take an edit back for, so the markup is editable from
+    the moment it mounts. That is not a mode anyone asked for - on a phone a tap
+    meant to scroll would raise the keyboard over a document being read - so the
+    attributes are turned off as the frame loads and the pen turns them on
+    again.
+
+    Toggling them beats re-rendering the document for a second config: the
+    frame, the scroll position and the zoom all stay as they were, and the
+    engine keeps the one open document the edit is applied to. The selector
+    reads the value it is about to write over, so which runs the renderer chose
+    is never something this side has to remember.
+  */
+  function setEditing(on: boolean) {
+    const doc = frameDocument();
+    if (!doc) return;
+    editing = on;
+    for (const el of doc.querySelectorAll(`[contenteditable="${on ? 'false' : 'true'}"]`)) {
+      el.setAttribute('contenteditable', String(on));
+    }
+    // Lets go of the caret, which is what closes a phone's keyboard.
+    if (!on) (doc.activeElement as HTMLElement | null)?.blur();
+    paintEdit();
+  }
+
+  /*
+    The frame runs no script of its own - the sandbox withholds `allow-scripts`,
+    so the `odr.generateDiff()` the renderer ships never exists - and the diff is
+    collected from here instead, exactly as that script would have: a changed
+    piece of text is attributed to the nearest ancestor carrying
+    `data-odr-path`, which is the address the engine reads it back at.
+
+    `childList` counts as well as `characterData`: emptying a run removes its
+    text node rather than shortening it, and that is as much an edit as any
+    other. Nothing else mutates this document - no script runs in it, and what
+    this side writes is attributes - so anything the observer sees is the
+    visitor typing.
+  */
+  function watchEdits(doc: Document) {
+    editWatcher = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        const near =
+          mutation.type === 'characterData'
+            ? mutation.target.parentElement
+            : (mutation.target as Element);
+        const owner = near?.closest?.('[data-odr-path]') as HTMLElement | null;
+        const path = owner?.getAttribute('data-odr-path');
+        if (path) edited.set(path, owner!);
+      }
+    });
+    editWatcher.observe(doc.body, { childList: true, subtree: true, characterData: true });
+
+    /* `Enter` is refused the way the renderer's own frontend refuses it: the
+       diff carries text, and a new line is structure. `Escape` is ours - with
+       one button doing both jobs, it is the way out of edit mode that does not
+       write a file. Both listeners are ours too, attached from this realm onto
+       the frame's document, which is what `allow-same-origin` buys. */
+    doc.addEventListener('keydown', (event) => {
+      if (!editing) return;
+      if (event.key === 'Escape') setEditing(false);
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      showAlert(
+        'A new line is more than an edit can hand back — this changes the text a document already has.',
+      );
+    });
+  }
+
+  /*
+    A save is a download: there is no file behind the document, only the bytes
+    that were dropped on the page. It is written under the name it was opened
+    as, so a browser that still has the original puts this one beside it - the
+    page cannot overwrite anything, and should not look like it did.
+
+    `Uint8Array<ArrayBuffer>` rather than the plain alias: the engine copies the
+    save out of the wasm heap into a buffer of its own, and a `Blob` takes no
+    view that might be over a shared one.
+  */
+  function saveBytes(bytes: Uint8Array<ArrayBuffer>, name: string) {
+    const url = URL.createObjectURL(new Blob([bytes], { type: currentMime }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    link.click();
+    // Revoked on the next task rather than this one: Safari reads the url after
+    // the click returns.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  /*
+    The round trip the engine gained in 6.12.0: what the visitor typed goes back
+    in as a diff, and the document - not the html it was rendered into - comes
+    out as bytes. The edits stay in the frame either way, so a failure costs the
+    visitor nothing but the file.
+  */
+  async function saveDocument() {
+    if (!currentDoc) return;
+    const name = filename.textContent || 'document';
+    showAlert(null);
+    editBtn.disabled = true;
+    // The engine works synchronously, so the disabled button has to paint
+    // before it starts.
+    await nextFrame();
+
+    try {
+      if (edited.size) {
+        const modifiedText: Record<string, string> = {};
+        for (const [path, el] of edited) modifiedText[path] = el.innerText;
+        currentDoc.edit(JSON.stringify({ modifiedText }));
+      }
+      saveBytes(currentDoc.save(), name);
+      edited.clear();
+      discardArmed = false;
+      setEditing(false);
+    } catch (e: any) {
+      const detail = e?.message || e?.name || 'Unknown error.';
+      showAlert(`${name} could not be saved — ${detail} Your changes are still here.`);
+    } finally {
+      editBtn.disabled = false;
+    }
+  }
+
+  /*
+    True where the caller should stand down: edits nobody saved are about to be
+    dropped, and this is the first time it was asked for. Saying so once and
+    letting the second attempt through beats a modal - the page never blocks on
+    a dialog - and beats losing the edits silently.
+  */
+  function wouldDiscard() {
+    if (!edited.size || discardArmed) return false;
+    discardArmed = true;
+    showAlert(
+      'This document has changes that were never saved. The pen, then the disc, writes them out — or repeat what you just did to drop them.',
+    );
+    return true;
+  }
+
   function teardown() {
+    editWatcher?.disconnect();
+    editWatcher = null;
+    edited.clear();
+    editing = false;
+    editable = false;
+    renderedEditable = false;
+    discardArmed = false;
+    paintEdit();
+    showAlert(null);
     currentDoc?.close();
     currentDoc = null;
     frameHost.replaceChildren();
@@ -290,6 +512,14 @@ export function mountViewer({
       if (doc) {
         defuseLinks(doc);
         matchCanvas(frame, doc);
+        if (renderedEditable) {
+          // Off, and the pen is what turns it on: the document mounts as
+          // something to read. Off even where the pen never appears - markup
+          // rendered editable is editable on sight, and a document nobody can
+          // save is the last one to leave that way.
+          setEditing(false);
+          if (editable) watchEdits(doc);
+        }
       }
       userZoom = null;
       fitZoom = 1;
@@ -468,13 +698,24 @@ export function mountViewer({
     // The frame is not laid out yet - the panel is what is on screen - but it
     // will take the width of the box that panel sits in.
     renderedFor = Math.round(root.clientWidth);
+    const asked = askedType(odr, name);
+    /*
+      Editable output carries `contenteditable` and a document path on every
+      text run, which is markup nobody can use where the format cannot be
+      written back out - a pdf, or an xlsx today. So the type is looked up
+      first, and only a format that can both edit and save is rendered for it.
+    */
+    const info = typeInfo(odr, asked ?? detectedType(odr, bytes));
+    const editableFormat = Boolean(info?.capabilities?.edit && info?.capabilities?.save);
+    renderedEditable = editableFormat;
+    currentMime = info?.mimeTypes?.[0] ?? 'application/octet-stream';
+
     const options: Record<string, unknown> = {
-      editable: false,
+      editable: editableFormat,
       spreadsheetCellLimit: SHEET_CELL_BUDGET,
       textDocumentMargin,
     };
     if (renderedFor > 0) options.viewportWidth = renderedFor;
-    const asked = askedType(odr, name);
     if (asked !== undefined) options.fileType = asked;
 
     try {
@@ -494,6 +735,16 @@ export function mountViewer({
       );
       return;
     }
+
+    /* `capabilities()` answers for the format, these two for the document that
+       was actually opened - a text file the engine renders read-only answers no
+       here and yes there. Both absent on a renderer older than 6.12.0, which
+       reads as a document without a pen. */
+    editable =
+      editableFormat &&
+      currentDoc.isEditable?.() === true &&
+      currentDoc.isSavable?.() === true;
+    paintEdit();
 
     // Instant on anything that is not a huge sheet, and on one that is (~2.2s
     // for the business register) it is work `render` does anyway and caches -
@@ -525,6 +776,7 @@ export function mountViewer({
   }
 
   async function openFile(file: File) {
+    if (wouldDiscard()) return;
     scrollTarget?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     showResult(false);
     setBusy(`Reading ${file.name}…`);
@@ -539,6 +791,7 @@ export function mountViewer({
   });
 
   sampleBtn.addEventListener('click', async () => {
+    if (wouldDiscard()) return;
     setBusy('Fetching the sample…');
     try {
       const response = await fetch('/sample.odt');
@@ -550,6 +803,7 @@ export function mountViewer({
   });
 
   resetBtn.addEventListener('click', () => {
+    if (wouldDiscard()) return;
     // `teardown` drops the frame along with the document.
     teardown();
     showResult(false);
@@ -598,6 +852,17 @@ export function mountViewer({
   if (!CAN_DROP) {
     status.textContent = IDLE_TITLE;
   }
+
+  /* One button, two jobs: the pen opens the document to typing, the disc it
+     turns into hands the typing back to the engine and writes the file. */
+  editBtn.addEventListener('click', () => {
+    if (editing) {
+      void saveDocument();
+      return;
+    }
+    showAlert(null);
+    setEditing(true);
+  });
 
   zoomInBtn.addEventListener('click', () => nudgeZoom(ZOOM_STEP));
   zoomOutBtn.addEventListener('click', () => nudgeZoom(1 / ZOOM_STEP));

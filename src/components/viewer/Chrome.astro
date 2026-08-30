@@ -49,6 +49,20 @@ const {
       >+</button>
     </div>
 
+    <!-- Hidden until a document that can be edited *and* saved is open; the
+         pen turns into a disc, and the disc is what writes the file out. See
+         the viewer script - editing happens in the frame's own dom, and the
+         engine takes it back as a diff. -->
+    <button
+      data-viewer-edit
+      hidden
+      type="button"
+      class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-outline transition-colors hover:bg-surface disabled:opacity-40"
+    >
+      <span data-viewer-edit-pen class="flex"><Icon name="pencil" class="h-4 w-4" /></span>
+      <span data-viewer-edit-disc hidden class="flex"><Icon name="save" class="h-4 w-4" /></span>
+    </button>
+
     <slot name="trailing" />
 
     <!-- Sized with the zoom buttons it sits beside, and named for what it
@@ -64,6 +78,15 @@ const {
     </button>
   </div>
 </div>
+
+<!-- What went wrong with an edit, and the one warning before edits nobody
+     saved are thrown away. Above the cut note, because it is news. -->
+<p
+  data-viewer-alert
+  hidden
+  class="shrink-0 border-b border-outline-variant bg-red-50 px-4 py-2 text-xs leading-relaxed text-red-700 dark:bg-red-950/40 dark:text-red-300"
+>
+</p>
 
 <!-- Only ever shown for a sheet the cell budget cut; see the viewer script. -->
 <p

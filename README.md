@@ -135,17 +135,45 @@ copies the body's computed background onto the `iframe` element — on the
 element rather than the document's root, so what is shown stays exactly as the
 renderer wrote it.
 
-### Editing is not wired up, and cannot be from here
+### Editing, and how a diff gets out of a frame that runs no script
 
-`odr.fileTypes()` reports `edit` and `save` for odt, odp, odg and docx, and
-rendering with `editable: true` really does come back `contenteditable` with a
-`data-odr-path` per run. There is still no way to write those edits back into
-the file: the wasm bindings expose `open`, `renderView`, `readPath`, `meta`,
-`capabilities`, `decrypt`, `listViews`, `detect` and `close`, and neither
-`html::edit` nor `Document::save` — which the jni, apple, python and cli
-bindings all have. Until they are bound, a save button here could only offer
-the rendered html, which is not the document anyone came with. Tracked as
-[OpenDocument.core#777](https://github.com/opendocument-app/OpenDocument.core/issues/777).
+6.12.0 bound the other half of the round trip — `edit(diff)`, `save()`,
+`isEditable()` and `isSavable()`
+([core#777](https://github.com/opendocument-app/OpenDocument.core/issues/777)) —
+so the bar has a pen on it. It turns into a disc: the pen opens the document to
+typing, the disc hands the typing back to the engine and downloads the document
+the engine writes. Both viewers get it, because both are the same script around
+the same bar.
+
+- **The pen only appears where an edit can be saved.** `odr.fileTypes()` reports
+  `edit` and `save` for odt, odp, odg and docx; ods can be saved but not edited,
+  and everything else neither. The type is looked up before `open`, so
+  `editable: true` — which writes `contenteditable` and a `data-odr-path` onto
+  every text run — is only asked for where it leads somewhere. After opening,
+  `isEditable()` and `isSavable()` answer for the document itself and settle it.
+- **Edit mode is an attribute toggle, not a second render.** The renderer's
+  editable output is editable the moment it mounts, which is not a mode anyone
+  asked for — on a phone a tap meant to scroll would raise the keyboard over a
+  document being read. So the `load` handler writes `contenteditable="false"`
+  across the frame and the pen writes it back to `true`. Re-rendering for a
+  second config would cost the scroll position, the zoom and the frame.
+- **The diff is collected from this side.** The renderer ships an
+  `odr.generateDiff()` that watches the document and reports the text of every
+  run that changed. It never runs — the frame is given `allow-same-origin` and
+  not `allow-scripts` — so a `MutationObserver` in the parent realm does the
+  same job through the same access the zoom bar uses, attributing a change to
+  the nearest `[data-odr-path]` ancestor. `childList` counts as well as
+  `characterData`: emptying a run removes its text node rather than shortening
+  it. `Enter` is refused the way the renderer's own script refuses it — the diff
+  carries text, and a new line is structure — and `Escape` leaves edit mode
+  without writing a file, which one button doing both jobs otherwise has no way
+  out of.
+- **A save is a download.** There is no file behind the document, only the bytes
+  that were dropped, so `save()` goes into a `blob:` and out through an `<a
+  download>` under the name it was opened as. Nothing is uploaded here either.
+- **Unsaved edits are warned about once.** Closing the document, or opening
+  another, says so above the frame and lets the second attempt through. The page
+  blocks on no dialog.
 
 ## Deployment
 
