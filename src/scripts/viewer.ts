@@ -441,6 +441,11 @@ export function mountViewer({
     in as a diff, and the document - not the html it was rendered into - comes
     out as bytes. The edits stay in the frame either way, so a failure costs the
     visitor nothing but the file.
+
+    The diff goes in as a json string, and stays one: 6.13.0's readme says to
+    hand `edit` the object instead, but the binding underneath is a
+    `std::string` and an object throws `BindingError` there - in 6.13.0 exactly
+    as in 6.12.0. The readme is what is wrong, so this call is left alone.
   */
   async function saveDocument() {
     if (!currentDoc) return;
