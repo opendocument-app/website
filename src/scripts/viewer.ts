@@ -7,7 +7,16 @@
   One viewer per page. The drop target is the window - dropping anywhere works,
   and the zone is only what lights up - so a second mount on one page would
   open the same file twice.
+
+  The document lives in an iframe that runs the renderer's own scripts and
+  nothing of ours but `frame-bridge.js`, which is written into the markup
+  before it mounts. The frame is sandboxed without `allow-same-origin`, so
+  this side never touches its dom: every command goes over `postMessage`, and
+  every answer comes back the same way. The engine - the wasm - stays here,
+  holding the one open document that an edit is applied to and a save is read
+  from.
 */
+import bridgeSource from './frame-bridge.js?raw';
 
 /*
   The renderer is ~1.4 MB gzipped, so it is never part of the page load: the
@@ -52,6 +61,28 @@ const DROP_ACTIVE = ['border-primary', 'bg-primary-container/30'];
 const CAN_DROP = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
 const IDLE_TITLE = CAN_DROP ? 'Drop a document here' : 'Open a document';
 const IDLE_HINT = 'ODT, ODS, ODP, DOCX, XLSX, PPTX, PDF and more — it stays on your device';
+
+/* The width of a line the Draw tool makes. The colour of each tool is on its
+   own colour input, in `#rrggbb`; the annotator takes it as 0..1 rgb. */
+const INK_WIDTH = 2;
+
+/*
+  What a refused edit says here. The page reports a reason and an English
+  message meant for a console; the wording a visitor sees is the host's, and
+  this is the host.
+*/
+const REFUSALS: Record<string, string> = {
+  newLine: 'A line break inside a paragraph is more than an edit can hand back.',
+  formula: 'That cell holds a formula, which stays as it is — type into a plain cell instead.',
+  formulaInput: 'Typing a formula is not supported yet; a number or some text is.',
+  rich: 'That cell holds more than plain text, so it stays as it is.',
+  shapes: 'That cell holds a drawing, so it stays as it is.',
+  readOnly: 'This document cannot be edited.',
+  unsupportedEdit: 'That kind of edit is not supported here.',
+  range: 'An edit cannot reach over a picture or a table.',
+  unnameableEdit: 'That edit landed where the engine cannot name it, so it was not taken.',
+  outOfScope: 'That edit reaches past what this page offers.',
+};
 
 /*
   Loaded once per page, whatever mounts. The rejection is not cached, so a
@@ -119,9 +150,26 @@ function askedType(odr: any, name: string): number | undefined {
   return dot < 0 ? undefined : askable.get(name.slice(dot + 1).toLowerCase());
 }
 
+/* `#rrggbb` to the 0..1 rgb triple the annotator takes. */
+function rgbOf(hex: string): number[] {
+  const n = parseInt(hex.slice(1), 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+
+/*
+  The bridge goes in just before `</body>`: after the renderer's own scripts,
+  which are written at the end of the body, so everything it wires exists by
+  the time it runs. A view without a body - there is none today - gets it at
+  the end, where it still runs.
+*/
+function withBridge(html: string) {
+  const script = `<script>${bridgeSource}</script>`;
+  const at = html.lastIndexOf('</body>');
+  return at < 0 ? html + script : html.slice(0, at) + script + html.slice(at);
+}
+
 export interface ViewerOptions {
-  /** Owns the viewer: every control is looked up inside it, and its width is
-   *  what the document is rendered for. */
+  /** Owns the viewer: every control is looked up inside it. */
   root: HTMLElement;
   /** Scrolled into view before a file opens, where the viewer is one section
    *  of a longer page. */
@@ -147,6 +195,8 @@ export function mountViewer({
     if (!el) throw new Error(`viewer: no [data-viewer-${name}] inside the root`);
     return el;
   };
+  const all = <T extends HTMLElement>(name: string) =>
+    root.querySelectorAll<T>(`[data-viewer-${name}]`);
 
   const panel = need('panel');
   const zone = need('zone');
@@ -157,7 +207,7 @@ export function mountViewer({
   const actions = need('actions');
   const fileInput = need<HTMLInputElement>('file');
   const pickBtn = need<HTMLButtonElement>('pick');
-  const sampleBtn = need<HTMLButtonElement>('sample');
+  const sampleBtns = all<HTMLButtonElement>('sample');
   const result = need('result');
   const frameHost = need('frame-host');
   const filename = need('filename');
@@ -167,49 +217,91 @@ export function mountViewer({
   const zoomInBtn = need<HTMLButtonElement>('zoom-in');
   const zoomLabel = need<HTMLButtonElement>('zoom-level');
   const cutNote = need('cut');
+  const staleNote = need('stale');
   const alertNote = need('alert');
-  const editBtn = need<HTMLButtonElement>('edit');
-  const penIcon = need('edit-pen');
-  const discIcon = need('edit-disc');
+  const penBtn = need<HTMLButtonElement>('pen');
+  const penEdit = need('pen-edit');
+  const penMark = need('pen-mark');
+  const saveBtn = need<HTMLButtonElement>('save');
+  const tools = need('tools');
+  const toolsHint = need('tools-hint');
+  const formatGroup = need('format');
+  const styleBtns = all<HTMLButtonElement>('style');
+  const highlightBtn = need<HTMLButtonElement>('highlight');
+  const colorInput = need<HTMLInputElement>('color');
+  const colorBar = need('color-bar');
+  const highlightColorInput = need<HTMLInputElement>('highlight-color');
+  const highlightBar = need('highlight-bar');
+  const sizeSelect = need<HTMLSelectElement>('size');
+  const markGroup = need('mark');
+  const toolBtns = all<HTMLButtonElement>('tool');
+  const toolColors = [...all<HTMLInputElement>('tool-color')];
+  const toolBars = [...all('tool-bar')];
+  const undoBtn = need<HTMLButtonElement>('undo');
+  const redoBtn = need<HTMLButtonElement>('redo');
   /* Everything about the open document. Inside the hidden box on the demo, and
      the right-hand half of the page's only bar on `/tryit`, which has to empty
      itself when the document goes. */
-  const openOnly = root.querySelectorAll<HTMLElement>('[data-viewer-open]');
+  const openOnly = all('open');
   /* Only the demo has these: links out to the full-screen page, which is
      pointless on the full-screen page itself. */
-  const expandLinks = root.querySelectorAll<HTMLElement>('[data-viewer-expand]');
+  const expandLinks = all('expand');
 
   let currentFrame: HTMLIFrameElement | null = null;
-  /** The width the document was rendered for, which it was fitted to. */
-  let renderedFor = 0;
-  /** The document's own width in css pixels where the renderer stated it;
-      null where it has to be measured, because it may also reflow. */
-  let statedPixels: number | null = null;
-  /** Scale at which the document's full width fits the frame. */
-  let fitZoom = 1;
-  /** null means "follow the fit", any number is a deliberate choice. */
-  let userZoom: number | null = null;
-
   let currentDoc: any = null;
   /** What to call the bytes a save hands back; the type the document opened as. */
   let currentMime = 'application/octet-stream';
+  let currentName = 'document';
 
-  /** Whether the markup in the frame was rendered editable, which is what the
-      `contenteditable` the frame mounts with has to be turned off again. */
-  let renderedEditable = false;
-  /** Whether this document can be edited *and* written back out. Both, because
-      an edit nobody can save is a promise the demo cannot keep. Narrower than
-      `renderedEditable`: the format's answer, then the document's. */
-  let editable = false;
-  /** Whether the pen has been pressed and not yet answered by the disc. */
-  let editing = false;
-  /** The diff being collected: the path the renderer wrote against the element
-      that carries it, whose text is read when the disc is pressed. */
-  const edited = new Map<string, HTMLElement>();
-  let editWatcher: MutationObserver | null = null;
+  /** What the open document takes, settled once the frame reports in. */
+  let canEdit = false;
+  let canFormat = false;
+  let canMark = false;
+  /** Whether the pen has been pressed: edit mode, or the marking tools shown. */
+  let modeOn = false;
+  /** The tool the frame reports as armed, which is what the buttons show. */
+  let armedTool: string | null = null;
+  /** What the page's log holds, as it reports it. */
+  let editDirty = false;
+  let canUndo = false;
+  let canRedo = false;
+  /** Marks pending in a pdf, and how many of them the last save carried. */
+  let marks = 0;
+  let savedMarks = 0;
   /** Set once edits nobody saved have been reported, so the second attempt at
       whatever would drop them goes through. */
   let discardArmed = false;
+  /** The zoom the frame reports, 1 being actual size. */
+  let currentZoom = 1;
+
+  /** Answers the frame owes: a request id to what resolves it. */
+  const asks = new Map<number, (payload: string | null) => void>();
+  let nextAsk = 1;
+
+  const dirty = () => editDirty || marks !== savedMarks;
+
+  /* One way in, one way out. `*` because the frame has no origin to name. */
+  function send(message: Record<string, unknown>) {
+    currentFrame?.contentWindow?.postMessage({ ...message, odrViewer: true }, '*');
+  }
+
+  /* A question with an answer: the frame replies with the same id. A frame
+     that never answers - torn down meanwhile - fails the ask rather than
+     hanging the button that waits on it. */
+  function ask(type: string): Promise<string | null> {
+    return new Promise((resolve, reject) => {
+      const id = nextAsk++;
+      const timer = window.setTimeout(() => {
+        asks.delete(id);
+        reject(new Error('The document did not answer.'));
+      }, 5000);
+      asks.set(id, (payload) => {
+        window.clearTimeout(timer);
+        resolve(payload);
+      });
+      send({ type, id });
+    });
+  }
 
   /** Swaps the page between the idle panel and a mounted document. */
   function showResult(on: boolean) {
@@ -298,121 +390,135 @@ export function mountViewer({
     cutNote.hidden = false;
   }
 
-  /* What went wrong with an edit, and the one warning before unsaved edits are
-     thrown away. Everything else the viewer has to say it says on the idle
-     panel, which is not on screen while a document is. */
-  function showAlert(message: string | null) {
+  /* What went wrong with an edit, and the one warning before unsaved changes
+     are thrown away. Everything else the viewer has to say it says on the idle
+     panel, which is not on screen while a document is. A refusal is news for
+     a moment and then in the way, so it clears itself. */
+  const ALERT_TONES = {
+    error: ['bg-red-50', 'text-red-700', 'dark:bg-red-950/40', 'dark:text-red-300'],
+    warn: ['bg-amber-50', 'text-amber-800', 'dark:bg-amber-950/40', 'dark:text-amber-200'],
+  };
+  let alertTimer: number | undefined;
+  function showAlert(message: string | null, tone: keyof typeof ALERT_TONES = 'error') {
+    window.clearTimeout(alertTimer);
     alertNote.textContent = message ?? '';
     alertNote.hidden = !message;
+    for (const t of Object.values(ALERT_TONES)) alertNote.classList.remove(...t);
+    if (message) alertNote.classList.add(...ALERT_TONES[tone]);
+    if (message && tone === 'warn') {
+      alertTimer = window.setTimeout(() => showAlert(null), 6000);
+    }
   }
 
-  function paintEdit() {
-    editBtn.hidden = !editable;
-    penIcon.hidden = editing;
-    discIcon.hidden = !editing;
-    const label = editing
-      ? 'Save this document with your changes'
-      : 'Edit the text in this document';
-    editBtn.title = label;
-    editBtn.setAttribute('aria-label', label);
-    editBtn.setAttribute('aria-pressed', String(editing));
+  /*
+    Writing a cell takes the cached result of every formula that reads it away
+    - the engine has no evaluator yet, and a number it knows to be wrong is
+    worse than none. The page marks those cells; this says what the mark means
+    and that the formulas are still there for the app that opens the file.
+  */
+  function showStale(count: number) {
+    if (!count) {
+      staleNote.hidden = true;
+      return;
+    }
+    staleNote.textContent = `${count} formula ${count === 1 ? 'cell shows a result' : 'cells show results'} your edit made out of date. The saved file keeps the formulas, and a spreadsheet app recomputes them when it opens the file.`;
+    staleNote.hidden = false;
+  }
+
+  /* The bar and the strip, from the state above. */
+  function paintChrome() {
+    const changeable = canEdit || canMark;
+    penBtn.hidden = !changeable;
+    saveBtn.hidden = !changeable;
+    penEdit.hidden = canMark;
+    penMark.hidden = !canMark;
+    const penLabel = canMark
+      ? modeOn
+        ? 'Put the marker down'
+        : 'Mark up this PDF'
+      : modeOn
+        ? 'Stop editing'
+        : 'Edit this document';
+    penBtn.title = penLabel;
+    penBtn.setAttribute('aria-label', penLabel);
+    penBtn.setAttribute('aria-pressed', String(modeOn));
     /* Filled while it is a mode rather than a way into one: the frame below is
-       taking typing, and the bar should say so without a word. */
-    editBtn.classList.toggle('bg-primary', editing);
-    editBtn.classList.toggle('text-on-primary', editing);
-    editBtn.classList.toggle('border-transparent', editing);
-    editBtn.classList.toggle('border-outline', !editing);
-    editBtn.classList.toggle('hover:bg-surface', !editing);
-  }
+       taking typing or marks, and the bar should say so without a word. */
+    penBtn.classList.toggle('bg-primary', modeOn);
+    penBtn.classList.toggle('text-on-primary', modeOn);
+    penBtn.classList.toggle('border-transparent', modeOn);
+    penBtn.classList.toggle('border-outline', !modeOn);
+    penBtn.classList.toggle('hover:bg-surface', !modeOn);
 
-  /*
-    Asked for editable output, the renderer writes `contenteditable="true"` onto
-    every text run it will take an edit back for, so the markup is editable from
-    the moment it mounts. That is not a mode anyone asked for - on a phone a tap
-    meant to scroll would raise the keyboard over a document being read - so the
-    attributes are turned off as the frame loads and the pen turns them on
-    again.
+    saveBtn.disabled = !dirty();
+    const saveLabel = canMark
+      ? 'Save this PDF with your marks'
+      : 'Save this document with your changes';
+    saveBtn.title = saveLabel;
+    saveBtn.setAttribute('aria-label', saveLabel);
 
-    Toggling them beats re-rendering the document for a second config: the
-    frame, the scroll position and the zoom all stay as they were, and the
-    engine keeps the one open document the edit is applied to. The selector
-    reads the value it is about to write over, so which runs the renderer chose
-    is never something this side has to remember.
-  */
-  function setEditing(on: boolean) {
-    const doc = frameDocument();
-    if (!doc) return;
-    editing = on;
-    for (const el of doc.querySelectorAll(`[contenteditable="${on ? 'false' : 'true'}"]`)) {
-      el.setAttribute('contenteditable', String(on));
+    tools.hidden = !modeOn;
+    formatGroup.hidden = !canFormat;
+    markGroup.hidden = !canMark;
+    undoBtn.disabled = canMark ? marks === 0 : !canUndo;
+    redoBtn.hidden = canMark;
+    redoBtn.disabled = !canRedo;
+    for (const b of toolBtns) {
+      b.setAttribute('aria-pressed', String(b.dataset.viewerTool === armedTool));
     }
-    // Lets go of the caret, which is what closes a phone's keyboard.
-    if (!on) (doc.activeElement as HTMLElement | null)?.blur();
-    paintEdit();
+    toolsHint.textContent = canMark
+      ? 'Select text, then a tool, to mark it once. A pressed tool marks every selection; Draw draws on the page.'
+      : canFormat
+        ? 'Type into the document. Select some text for the buttons, or Ctrl+B, I and U.'
+        : 'Double-click a cell, or just start typing into it. Enter keeps the value, Escape drops it.';
   }
 
-  /*
-    The frame runs no script of its own - the sandbox withholds `allow-scripts`,
-    so the `odr.generateDiff()` the renderer ships never exists - and the diff is
-    collected from here instead, exactly as that script would have: a changed
-    piece of text is attributed to the nearest ancestor carrying
-    `data-odr-path`, which is the address the engine reads it back at.
-
-    `childList` counts as well as `characterData`: emptying a run removes its
-    text node rather than shortening it, and that is as much an edit as any
-    other. Nothing else mutates this document - no script runs in it, and what
-    this side writes is attributes - so anything the observer sees is the
-    visitor typing.
-  */
-  function watchEdits(doc: Document) {
-    editWatcher = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        const near =
-          mutation.type === 'characterData'
-            ? mutation.target.parentElement
-            : (mutation.target as Element);
-        const owner = near?.closest?.('[data-odr-path]') as HTMLElement | null;
-        const path = owner?.getAttribute('data-odr-path');
-        if (path) edited.set(path, owner!);
-      }
-    });
-    editWatcher.observe(doc.body, { childList: true, subtree: true, characterData: true });
-
-    /* `Enter` is refused the way the renderer's own frontend refuses it: the
-       diff carries text, and a new line is structure. `Escape` is ours - with
-       one button doing both jobs, it is the way out of edit mode that does not
-       write a file. Both listeners are ours too, attached from this realm onto
-       the frame's document, which is what `allow-same-origin` buys. */
-    doc.addEventListener('keydown', (event) => {
-      if (!editing) return;
-      if (event.key === 'Escape') setEditing(false);
-      if (event.key !== 'Enter') return;
-      event.preventDefault();
-      showAlert(
-        'A new line is more than an edit can hand back — this changes the text a document already has.',
-      );
-    });
-  }
-
-  /*
-    `isEditable`/`isSavable` are 6.12.0 bindings, and a renderer older than the
-    page is not the only way to be without them: `/odr/` served the wrapper, the
-    glue and the wasm under one path until 6.12.0, and those are three cache
-    entries on their own clocks. A visitor can therefore hold a 6.11.0 wasm
-    under a 6.12.0 wrapper, where the method is on the object and the module
-    behind it has nothing to call - a `TypeError`, not an answer. Asking is the
-    only way to find out, so the question is asked in a net.
-
-    Either way the reply is the same, and it is not an error: this renderer does
-    not edit. Everything else about it still works, so the document opens as it
-    always did, without a pen.
-  */
-  function canEdit(doc: any) {
-    try {
-      return doc.isEditable?.() === true && doc.isSavable?.() === true;
-    } catch {
-      return false;
+  /* The buttons show what the selection has, as the page reports it: a key
+     per property the selected runs agree on, and none where they differ. */
+  function paintSelection(style: Record<string, unknown>) {
+    for (const b of styleBtns) {
+      b.setAttribute('aria-pressed', String(style[b.dataset.viewerStyle ?? ''] === true));
     }
+    highlightBtn.setAttribute('aria-pressed', String(typeof style.highlight === 'string'));
+    if (typeof style.color === 'string' && /^#[0-9a-f]{6}$/i.test(style.color)) {
+      colorInput.value = style.color;
+    }
+    if (typeof style.highlight === 'string' && /^#[0-9a-f]{6}$/i.test(style.highlight)) {
+      highlightColorInput.value = style.highlight;
+    }
+    paintColor();
+    paintHighlight();
+    const size = typeof style.size === 'string' ? style.size : '';
+    sizeSelect.value = [...sizeSelect.options].some((o) => o.value === size) ? size : '';
+  }
+
+  /*
+    The pen. For a document it asks the page to turn its editing mode on, and
+    the page's own answer - `editMode` below - is what flips the button. For a
+    pdf it only opens the strip of marking tools, and closing the strip
+    disarms whatever tool is armed. The annotator has no mode to report, so the
+    button flips here.
+  */
+  function setMode(on: boolean) {
+    showAlert(null);
+    if (canMark) {
+      modeOn = on;
+      if (!on) sendTool(null, false);
+      paintChrome();
+    } else if (canEdit) {
+      send({ type: 'edit', on });
+    }
+    if (on) currentFrame?.focus();
+  }
+
+  /** The colour a marking tool uses, from its own input. */
+  function colorOf(tool: string): string {
+    return toolColors.find((i) => i.dataset.viewerToolColor === tool)?.value ?? '#000000';
+  }
+
+  function sendTool(tool: string | null, toggle: boolean, recolor = false) {
+    const color = tool ? rgbOf(colorOf(tool)) : null;
+    send({ type: 'tool', tool, color, width: INK_WIDTH, toggle, recolor });
   }
 
   /*
@@ -437,68 +543,79 @@ export function mountViewer({
   }
 
   /*
-    The round trip the engine gained in 6.12.0: what the visitor typed goes back
-    in as a diff, and the document - not the html it was rendered into - comes
-    out as bytes. The edits stay in the frame either way, so a failure costs the
+    The round trip. What the visitor did in the frame comes out of it as the
+    engine's own envelope - the operation log for an edit, the marks for a pdf
+    - goes into the engine here, and the file the engine writes goes out as a
+    download. The frame keeps what it holds either way, so a failure costs the
     visitor nothing but the file.
 
-    The diff goes in as a json string, and stays one: 6.13.0's readme says to
-    hand `edit` the object instead, but the binding underneath is a
-    `std::string` and an object throws `BindingError` there - in 6.13.0 exactly
-    as in 6.12.0. The readme is what is wrong, so this call is left alone.
+    Both envelopes are json strings and stay strings: the package's readme says
+    `edit` takes the object, but the binding underneath is a `std::string` and
+    an object throws `BindingError` there - in 7.0.0 as in 6.12.0.
   */
   async function saveDocument() {
     if (!currentDoc) return;
-    const name = filename.textContent || 'document';
     showAlert(null);
-    editBtn.disabled = true;
+    saveBtn.disabled = true;
     // The engine works synchronously, so the disabled button has to paint
     // before it starts.
     await nextFrame();
 
     try {
-      if (edited.size) {
-        const modifiedText: Record<string, string> = {};
-        for (const [path, el] of edited) modifiedText[path] = el.innerText;
-        currentDoc.edit(JSON.stringify({ modifiedText }));
+      if (canMark) {
+        const payload = await ask('getAnnotations');
+        if (!payload) throw new Error('The marks could not be read back.');
+        saveBytes(currentDoc.annotate(payload), currentName);
+        savedMarks = marks;
+      } else {
+        const payload = await ask('getOperations');
+        if (!payload) throw new Error('The edits could not be read back.');
+        if (JSON.parse(payload).ops.length) currentDoc.edit(payload);
+        saveBytes(currentDoc.save(), currentName);
+        // The page and the file agree now: its log resets, undo starts over.
+        send({ type: 'committed' });
       }
-      saveBytes(currentDoc.save(), name);
-      edited.clear();
       discardArmed = false;
-      setEditing(false);
     } catch (e: any) {
       const detail = e?.message || e?.name || 'Unknown error.';
-      showAlert(`${name} could not be saved — ${detail} Your changes are still here.`);
+      showAlert(`${currentName} could not be saved — ${detail} Your changes are still here.`);
     } finally {
-      editBtn.disabled = false;
+      paintChrome();
     }
   }
 
   /*
-    True where the caller should stand down: edits nobody saved are about to be
-    dropped, and this is the first time it was asked for. Saying so once and
+    True where the caller should stand down: changes nobody saved are about to
+    be dropped, and this is the first time it was asked for. Saying so once and
     letting the second attempt through beats a modal - the page never blocks on
-    a dialog - and beats losing the edits silently.
+    a dialog - and beats losing the changes silently.
   */
   function wouldDiscard() {
-    if (!edited.size || discardArmed) return false;
+    if (!dirty() || discardArmed) return false;
     discardArmed = true;
     showAlert(
-      'This document has changes that were never saved. The pen, then the disc, writes them out — or repeat what you just did to drop them.',
+      'This document has changes that were never saved. The disc writes them out — or repeat what you just did to drop them.',
     );
     return true;
   }
 
   function teardown() {
-    editWatcher?.disconnect();
-    editWatcher = null;
-    edited.clear();
-    editing = false;
-    editable = false;
-    renderedEditable = false;
+    for (const [, resolve] of asks) resolve(null);
+    asks.clear();
+    modeOn = false;
+    canEdit = false;
+    canFormat = false;
+    canMark = false;
+    editDirty = false;
+    canUndo = false;
+    canRedo = false;
+    marks = 0;
+    savedMarks = 0;
+    armedTool = null;
     discardArmed = false;
-    paintEdit();
+    paintChrome();
     showAlert(null);
+    showStale(0);
     currentDoc?.close();
     currentDoc = null;
     frameHost.replaceChildren();
@@ -528,183 +645,111 @@ export function mountViewer({
   function mountFrame(html: string) {
     const frame = document.createElement('iframe');
     frame.title = 'Rendered document';
-    // `allow-same-origin` without `allow-scripts`: reaching into the document
-    // is what lets the zoom bar drive it, and no script can run in the frame at
-    // all. That is strictly tighter than the reverse - the renderer's own inline
-    // scripts were already refused by the page's `script-src`, so nothing is
-    // lost but its zoom api, which the fit written into its css stands in for.
-    frame.setAttribute('sandbox', 'allow-same-origin');
+    // `allow-scripts` without `allow-same-origin`: the renderer's own scripts
+    // run - they are the editor, the cell overlay, the annotator and the zoom
+    // - and the document gets an opaque origin, so a `javascript:` link in it
+    // runs there and nowhere else. This side cannot reach in either, which is
+    // what the bridge is for. Granting both would be no sandbox at all.
+    frame.setAttribute('sandbox', 'allow-scripts');
     // No background of our own: a rendered document paints its own canvas
     // (white for text flow, #525659 behind paginated pages), and forcing white
     // here is what shows through when a phone rubber-bands past the content.
     frame.className = 'h-full w-full border-0';
-    frame.addEventListener('load', () => {
-      currentFrame = frame;
-      const doc = frame.contentDocument;
-      if (doc) {
-        defuseLinks(doc);
-        matchCanvas(frame, doc);
-        if (renderedEditable) {
-          // Off, and the pen is what turns it on: the document mounts as
-          // something to read. Off even where the pen never appears - markup
-          // rendered editable is editable on sight, and a document nobody can
-          // save is the last one to leave that way.
-          setEditing(false);
-          if (editable) watchEdits(doc);
-        }
-      }
-      userZoom = null;
-      fitZoom = 1;
-      statedPixels = statedContent();
-      // The document already opened at the fit written into its own css. This
-      // only corrects the width that was guessed for it: the frame's scrollbar
-      // comes off it, and the window may have been resized while it rendered.
-      refit();
-      applyZoom();
-      zoomBar.hidden = false;
-    });
     frameHost.replaceChildren(frame);
-    frame.srcdoc = html;
+    currentFrame = frame;
+    frame.srcdoc = withBridge(html);
   }
 
   /*
-    The renderer paints its canvas on the document's `body` - white behind
-    reflowing text, #525659 behind paginated pages. A body background normally
-    propagates to the frame's own canvas, which is what a rubber-band scroll
-    past either end of the document paints; it stops propagating as soon as the
-    zoom bar writes `zoom` onto that same body, and the overscroll then showed
-    the frame host's `bg-surface-container` through the transparent root - our
-    colour, not the document's, and light behind a dark page canvas.
-
-    So the frame is given the colour its document chose. On the element rather
-    than on the document's root: what is being shown stays exactly as the
-    renderer wrote it, and the fix goes away with the frame.
+    The frame's side of the conversation. Only the current frame is listened
+    to: a message from a frame that was torn down, or from anything else on
+    the page, is not ours.
   */
-  function matchCanvas(frame: HTMLIFrameElement, doc: Document) {
-    const background = getComputedStyle(doc.body).backgroundColor;
-    // A transparent body has nothing to say; leave the host colour showing.
-    if (background && !/^rgba\(0, 0, 0, 0\)$|^transparent$/.test(background)) {
-      frame.style.background = background;
-    }
-  }
-
-  /*
-    6.11.0 dropped the blanket `<base target="_blank">`, so the renderer now
-    tells three kinds of link apart: one that leaves the page carries
-    `target="_blank"`, one back into what serves the page carries nothing and
-    navigates in place, and one whose scheme is refused carries no `href` at
-    all. That is right for a host that serves what it rendered - it is what
-    makes an archive listing's entries work - and this demo is not one. There
-    is a single `srcdoc` document and no route behind `a.txt`, so a click on an
-    archive entry used to be swallowed by the missing `allow-popups` and now
-    navigates the frame onto our own 404.
-
-    So the relative ones are drawn as what they are here: named, not openable.
-    External ones are left alone, still inert against the missing
-    `allow-popups`; granting it so a dropped document could open tabs is not a
-    trade this page should make.
-
-    A fragment needs the opposite treatment. `srcdoc` resolves urls against
-    *this* page, not the frame's own document, so a pdf's `#p2` points at
-    `https://opendocument.app/#p2` and a click on the contents page replaces
-    the document with our homepage. Stripping the href and scrolling from here
-    is what the link meant: the frame runs no script, but this document is
-    same-origin, so the handler runs in our realm and reaches into it - the
-    same access the zoom bar already needs. A pdf's contents page therefore
-    works here for the first time.
-  */
-  function defuseLinks(doc: Document) {
-    for (const a of doc.querySelectorAll<HTMLAnchorElement>('a[href]')) {
-      const href = a.getAttribute('href');
-      if (!href) continue;
-
-      if (href.startsWith('#')) {
-        a.removeAttribute('href');
-        a.style.cursor = 'pointer';
-        a.addEventListener('click', (event) => {
-          event.preventDefault();
-          // `smooth` is dropped on the floor in this frame - the animation wants
-          // a user activation in the frame's own realm, and the click arrives
-          // in ours. A page anchor is a jump anyway.
-          doc.getElementById(href.slice(1))?.scrollIntoView({ behavior: 'instant', block: 'start' });
-        });
-        continue;
+  window.addEventListener('message', (event) => {
+    if (!currentFrame || event.source !== currentFrame.contentWindow) return;
+    const m = event.data;
+    if (!m || m.odrViewer !== true) return;
+    switch (m.type) {
+      case 'ready':
+        /*
+          The renderer paints its canvas on the document's `body` - white
+          behind reflowing text, #525659 behind paginated pages - and that is
+          what a rubber-band scroll past either end should paint, not the
+          host's own colour behind a transparent root. The frame is given the
+          colour its document chose. On the element rather than in the
+          document, so what is shown stays exactly as the renderer wrote it.
+        */
+        if (m.background && !/^rgba\(0, 0, 0, 0\)$|^transparent$/.test(m.background)) {
+          currentFrame.style.background = m.background;
+        }
+        // The engine answered for the format and the document; the page
+        // answers for the markup it was actually given.
+        canEdit = canEdit && m.editable === true;
+        canFormat = canEdit && !m.sheet;
+        canMark = canMark && m.annotatable === true;
+        paintZoom(m.zoom);
+        zoomBar.hidden = false;
+        paintChrome();
+        break;
+      case 'zoom':
+        paintZoom(m.zoom);
+        break;
+      case 'editMode':
+        modeOn = m.event?.editing === true;
+        if (m.event?.reason) showAlert(REFUSALS[m.event.reason] ?? m.event.message, 'warn');
+        paintChrome();
+        break;
+      case 'editChange':
+        editDirty = m.event?.dirty === true;
+        canUndo = m.event?.canUndo === true;
+        canRedo = m.event?.canRedo === true;
+        paintChrome();
+        break;
+      case 'editRefused':
+        showAlert(REFUSALS[m.event?.reason] ?? m.event?.message ?? 'That edit was not taken.', 'warn');
+        break;
+      case 'cellsStale':
+        showStale(Array.isArray(m.event?.cells) ? m.event.cells.length : 0);
+        break;
+      case 'selection':
+        paintSelection(m.style ?? {});
+        break;
+      case 'marks':
+        marks = Number(m.count) || 0;
+        paintChrome();
+        break;
+      case 'tool':
+        armedTool = typeof m.armed === 'string' ? m.armed : null;
+        paintChrome();
+        break;
+      case 'escape':
+        if (modeOn) setMode(false);
+        break;
+      case 'error':
+        console.warn(`renderer error ${m.code}: ${m.message}`);
+        break;
+      case 'operations':
+      case 'annotations': {
+        const resolve = asks.get(m.id);
+        asks.delete(m.id);
+        resolve?.(typeof m.payload === 'string' ? m.payload : null);
+        break;
       }
-
-      if (a.target === '_blank') continue;
-      a.removeAttribute('href');
-      a.title = 'This demo renders one document. Opening what it links to is what the apps do.';
-      a.style.cursor = 'default';
     }
-  }
+  });
 
-  /* The frame is same-origin, so the document can be measured from here. */
-  function frameDocument() {
-    try {
-      return currentFrame?.contentDocument ?? null;
-    } catch {
-      return null;
-    }
-  }
-
-  /*
-    Rendering for a width makes the renderer fit paged output to it and say so:
-    `--odr-fit` is the factor it applied, and the document's own width follows
-    from the width it was given. It is stated only where the document had to be
-    scaled down - one that already fitted keeps its width to itself, and is
-    measured instead.
-  */
-  function statedContent() {
-    const root = frameDocument()?.documentElement;
-    if (!root || !renderedFor) return null;
-    const fit = parseFloat(getComputedStyle(root).getPropertyValue('--odr-fit'));
-    return fit > 0 && fit < 1 ? renderedFor / fit : null;
-  }
-
-  function refit() {
-    const doc = frameDocument();
-    const available = doc?.documentElement.clientWidth ?? 0;
-    if (!doc || !available) return;
-
-    let content = statedPixels;
-    if (content === null) {
-      // Measured unscaled, or each pass would compound the previous one, and
-      // each time: what was not fitted may be reflowing to the frame instead,
-      // and then its width is a different number after every resize.
-      showZoom(doc, 1);
-      content = doc.body.scrollWidth;
-      showZoom(doc, userZoom ?? fitZoom);
-    }
-
-    // Never enlarge: a document narrower than the frame belongs at its own size.
-    fitZoom = content ? Math.min(1, available / content) : 1;
-  }
-
-  /** Writes a scale everywhere the document reads one. */
-  function showZoom(doc: Document, zoom: number) {
-    // The renderer wrote the fit onto `body{zoom}`; overriding that rule keeps
-    // one scale on the document rather than stacking a second one above it.
-    doc.body.style.zoom = String(zoom);
-    // An image view is sized by `max-width` instead, and reads this to grow
-    // past the frame along with the zoom. Inert in every other view.
-    doc.documentElement.style.setProperty('--odr-zoom', String(zoom));
-  }
-
-  function applyZoom() {
-    const doc = frameDocument();
-    if (!doc) return;
-    const zoom = userZoom ?? fitZoom;
-    showZoom(doc, zoom);
+  /* The zoom is the renderer's: it fits the document to the frame, refits on
+     a rotation, and reports every change. These only ask, and show. */
+  function paintZoom(zoom: number) {
+    currentZoom = zoom;
     zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
     zoomOutBtn.disabled = zoom <= ZOOM_MIN;
     zoomInBtn.disabled = zoom >= ZOOM_MAX;
   }
 
-  const clampZoom = (zoom: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom));
-
   function nudgeZoom(factor: number) {
-    userZoom = clampZoom((userZoom ?? fitZoom) * factor);
-    applyZoom();
+    const value = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, currentZoom * factor));
+    send({ type: 'setZoom', value });
   }
 
   async function open(bytes: Uint8Array, name: string) {
@@ -727,27 +772,28 @@ export function mountViewer({
     setBusy(`Opening ${name}…`);
     await nextFrame();
 
-    // The frame is not laid out yet - the panel is what is on screen - but it
-    // will take the width of the box that panel sits in.
-    renderedFor = Math.round(root.clientWidth);
     const asked = askedType(odr, name);
     /*
-      Editable output carries `contenteditable` and a document path on every
-      text run, which is markup nobody can use where the format cannot be
-      written back out - a pdf, or an xlsx today. So the type is looked up
-      first, and only a format that can both edit and save is rendered for it.
+      Editable output carries an address on every run and the editor's script,
+      which is markup nobody can use where the format cannot be written back
+      out. So the type is looked up first, and only a format that can both
+      edit and save is rendered for it. The mode still starts off: the pen is
+      what turns it on, and only in the frame, so a phone does not raise its
+      keyboard over a document being read.
     */
     const info = typeInfo(odr, asked ?? detectedType(odr, bytes));
     const editableFormat = Boolean(info?.capabilities?.edit && info?.capabilities?.save);
-    renderedEditable = editableFormat;
+    const markableFormat = Boolean(info?.capabilities?.annotate);
     currentMime = info?.mimeTypes?.[0] ?? 'application/octet-stream';
+    currentName = name;
 
+    // No width: the renderer's viewport script measures the frame it lands in
+    // and refits on a resize, which a width guessed here could not follow.
     const options: Record<string, unknown> = {
       editable: editableFormat,
       spreadsheetCellLimit: SHEET_CELL_BUDGET,
       textDocumentMargin,
     };
-    if (renderedFor > 0) options.viewportWidth = renderedFor;
     if (asked !== undefined) options.fileType = asked;
 
     try {
@@ -768,16 +814,21 @@ export function mountViewer({
       return;
     }
 
-    // `capabilities()` answers for the format, `canEdit` for the document that
-    // was actually opened - a text file the engine renders read-only answers no
-    // there and yes here.
-    editable = editableFormat && canEdit(currentDoc);
-    paintEdit();
+    /*
+      `capabilities()` answers for the format, the document for itself: a pdf
+      whose cross-reference table had to be rebuilt takes no marks, and a
+      plain text file - which the engine can edit and save - is not a document
+      to this package, so the questions throw rather than answer. Asking in a
+      net turns both into the same honest thing: no pen.
+    */
+    canEdit = editableFormat && answers(() => currentDoc.isEditable() && currentDoc.isSavable());
+    canMark = markableFormat && answers(() => currentDoc.isAnnotatable());
+    paintChrome();
 
     // Instant on anything that is not a huge sheet, and on one that is (~2.2s
     // for the business register) it is work `render` does anyway and caches -
     // asking first costs ~10% of the total, and buys saying so before the wait
-    // rather than after. Absent on an older renderer, which reads as no cut.
+    // rather than after.
     showCut(currentDoc.listViews()[0]?.sheetCut);
 
     setBusy(`Rendering ${name}…`);
@@ -803,17 +854,19 @@ export function mountViewer({
     mountFrame(html);
   }
 
+  function answers(question: () => boolean) {
+    try {
+      return question() === true;
+    } catch {
+      return false;
+    }
+  }
+
   /*
     `open` reports what it knows how to fail at - a format it will not open, a
-    password, a render that gave up - and leaves anything else to throw. What
-    used to catch that was whoever called it: nothing, on a dropped file, which
-    left the panel on `Reading…` for good, and the sample's own handler, which
-    called every failure a fetch that did not arrive. Both were wrong about a
-    renderer that is not quite the one this page was built against, which is a
-    state a visitor can be left in for a day.
-
-    So there is one net, and it says the true thing: this document did not open,
-    here is why, and the panel is back.
+    password, a render that gave up - and leaves anything else to throw. There
+    is one net, and it says the true thing: this document did not open, here
+    is why, and the panel is back.
   */
   async function openSafely(bytes: Uint8Array, name: string) {
     try {
@@ -844,25 +897,30 @@ export function mountViewer({
     fileInput.value = '';
   });
 
-  sampleBtn.addEventListener('click', async () => {
-    if (wouldDiscard()) return;
-    setBusy('Fetching the sample…');
+  /* One sample per format, each chip naming its file. */
+  for (const btn of sampleBtns) {
+    btn.addEventListener('click', async () => {
+      if (wouldDiscard()) return;
+      const path = btn.dataset.viewerSample ?? '';
+      const name = path.slice(path.lastIndexOf('/') + 1) || 'sample';
+      setBusy(`Fetching ${name}…`);
 
-    // Only the fetch is inside this: opening the bytes can fail for reasons
-    // that have nothing to do with the network, and saying "could not be
-    // fetched" about one of those sends the visitor to look at their wifi.
-    let bytes: Uint8Array;
-    try {
-      const response = await fetch('/sample.odt');
-      if (!response.ok) throw new Error(String(response.status));
-      bytes = new Uint8Array(await response.arrayBuffer());
-    } catch {
-      setIdle('The sample could not be fetched', 'Check your connection and try again.', true);
-      return;
-    }
+      // Only the fetch is inside this: opening the bytes can fail for reasons
+      // that have nothing to do with the network, and saying "could not be
+      // fetched" about one of those sends the visitor to look at their wifi.
+      let bytes: Uint8Array;
+      try {
+        const response = await fetch(path);
+        if (!response.ok) throw new Error(String(response.status));
+        bytes = new Uint8Array(await response.arrayBuffer());
+      } catch {
+        setIdle('The sample could not be fetched', 'Check your connection and try again.', true);
+        return;
+      }
 
-    await openSafely(bytes, 'sample.odt');
-  });
+      await openSafely(bytes, name);
+    });
+  }
 
   resetBtn.addEventListener('click', () => {
     if (wouldDiscard()) return;
@@ -915,34 +973,106 @@ export function mountViewer({
     status.textContent = IDLE_TITLE;
   }
 
-  /* One button, two jobs: the pen opens the document to typing, the disc it
-     turns into hands the typing back to the engine and writes the file. */
-  editBtn.addEventListener('click', () => {
-    if (editing) {
-      void saveDocument();
-      return;
-    }
-    showAlert(null);
-    setEditing(true);
+  penBtn.addEventListener('click', () => setMode(!modeOn));
+  saveBtn.addEventListener('click', () => void saveDocument());
+
+  /*
+    A button in the strip must not take the focus from the frame: the
+    selection it acts on lives there, and a click that moved the focus would
+    still find it, but the typing after it would land nowhere. Cancelling the
+    mousedown keeps the caret where it is - on touch too, through the mouse
+    events a tap synthesises.
+  */
+  const keepFocus = (e: Event) => e.preventDefault();
+  for (const b of [...styleBtns, highlightBtn, ...toolBtns, undoBtn, redoBtn]) {
+    b.addEventListener('mousedown', keepFocus);
+  }
+  for (const b of styleBtns) {
+    b.addEventListener('click', () => send({ type: 'toggle', property: b.dataset.viewerStyle }));
+  }
+  highlightBtn.addEventListener('click', () => {
+    const on = highlightBtn.getAttribute('aria-pressed') === 'true';
+    send({ type: 'format', style: { highlight: on ? null : highlightColorInput.value } });
   });
+  sizeSelect.addEventListener('change', () => {
+    if (sizeSelect.value) send({ type: 'format', style: { size: sizeSelect.value } });
+  });
+
+  /*
+    A tool button: with text selected in the frame it marks that selection
+    once and leaves no tool armed; pressed while armed it disarms; otherwise it
+    arms. The frame decides, because only it can see the selection, and it
+    reports back what is armed.
+  */
+  for (const b of toolBtns) {
+    b.addEventListener('click', () => sendTool(b.dataset.viewerTool ?? 'highlight', true));
+  }
+
+  /*
+    A colour control: a picker laid over a bar that shows its colour. `apply`
+    runs on `change`, not `input`, because a picker fires `input` for every
+    pixel the pointer crosses, and each one would be an edit of its own.
+
+    A second press closes the picker. The browser opens the picker on every
+    click, also while it is open, so that click is cancelled, and a change of
+    the input's type closes the picker, because the picker belongs to the
+    colour type. The close fires `change` itself, because a browser may not,
+    and a colour that was applied since the picker opened is not applied
+    again. A blur means that the picker closed some other way.
+  */
+  function colourControl(input: HTMLInputElement, bar: HTMLElement | undefined, apply: () => void) {
+    let open = false;
+    let applied = input.value;
+    const paint = () => {
+      if (bar) bar.style.background = input.value;
+    };
+    paint();
+    input.addEventListener('input', paint);
+    input.addEventListener('change', () => {
+      if (input.value === applied) return;
+      applied = input.value;
+      apply();
+    });
+    input.addEventListener('click', (e) => {
+      if (!open) {
+        open = true;
+        applied = input.value;
+        return;
+      }
+      e.preventDefault();
+      open = false;
+      input.type = 'text';
+      input.type = 'color';
+      input.blur();
+      input.dispatchEvent(new Event('change'));
+    });
+    input.addEventListener('blur', () => {
+      open = false;
+    });
+    return paint;
+  }
+
+  const paintColor = colourControl(colorInput, colorBar, () =>
+    send({ type: 'format', style: { color: colorInput.value } }),
+  );
+  // A highlight colour goes where a text colour goes: onto the selection, or
+  // onto the word at the caret.
+  const paintHighlight = colourControl(highlightColorInput, highlightBar, () =>
+    send({ type: 'format', style: { highlight: highlightColorInput.value } }),
+  );
+  // A tool's colour marks a selection once, or recolours the tool if it is
+  // armed; the frame decides which.
+  for (const input of toolColors) {
+    const tool = input.dataset.viewerToolColor ?? '';
+    const bar = toolBars.find((b) => b.dataset.viewerToolBar === tool);
+    colourControl(input, bar, () => sendTool(tool, false, true));
+  }
+  undoBtn.addEventListener('click', () => send({ type: 'undo' }));
+  redoBtn.addEventListener('click', () => send({ type: 'redo' }));
 
   zoomInBtn.addEventListener('click', () => nudgeZoom(ZOOM_STEP));
   zoomOutBtn.addEventListener('click', () => nudgeZoom(1 / ZOOM_STEP));
-  zoomLabel.addEventListener('click', () => {
-    userZoom = null;
-    refit();
-    applyZoom();
-  });
-
-  // A rotated phone changes the frame width, so the fit has to be recomputed.
-  let resizeTimer: number | undefined;
-  window.addEventListener('resize', () => {
-    window.clearTimeout(resizeTimer);
-    resizeTimer = window.setTimeout(() => {
-      refit();
-      if (userZoom === null) applyZoom();
-    }, 150);
-  });
+  zoomLabel.addEventListener('click', () => send({ type: 'resetZoom' }));
 
   window.addEventListener('pagehide', teardown);
 }

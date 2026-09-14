@@ -1,0 +1,14 @@
+A sample text file
+==================
+
+Opened in your browser by OpenDocument Reader. Nothing was uploaded: the
+file was read, decoded and laid out on your own machine.
+
+Plain text has no formatting to keep, so this view keeps the one thing it
+has - the lines, numbered, in a fixed-width face.
+
+Press the pen above this file. You can then type into it, and the disc
+beside the pen downloads what you typed as a new text file. Encoding is
+detected on the way in; what comes out is UTF-8.
+
+Now drop a text file of your own onto the page.

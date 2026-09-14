@@ -44,6 +44,8 @@ fine in `dev`; check the viewer with `npm run build && npm run preview`.
 | `src/components/StoreBadge.astro` | official Play / App Store / F-Droid / Obtainium artwork, aligned |
 | `src/data/links.ts` | every outbound URL, in one place |
 | `src/styles/global.css` | the design tokens |
+| `src/scripts/frame-bridge.js` | the one script of ours inside the frame; the viewer's other half |
+| `public/samples/` | one sample document per format, the same content saved as each |
 | `scripts/sync-odr.mjs` | vendors the wasm renderer into `public/odr/` |
 
 ## The demo
@@ -54,7 +56,7 @@ laid out in the browser and shown in a sandboxed `srcdoc` iframe. Nothing is
 uploaded — the page's `connect-src 'self'` makes that checkable in devtools
 rather than merely claimed.
 
-Two things about it are deliberate and easy to undo by accident:
+Several things about it are deliberate and easy to undo by accident:
 
 - **The renderer is not bundled, and its path carries its version.**
   `prebuild` copies `index.js`, `odr-core.mjs` and `odr-core.wasm` into
@@ -68,17 +70,31 @@ Two things about it are deliberate and easy to undo by accident:
   for the version. **One version is ever on the site**: `/odr/index.js` is a
   generated forwarder to it, for html cached from before a release, and there
   is no second copy of anything to be half loaded from.
-- **It loads on interaction, never on page load.** The wasm is 3.5 MB (1.35 MB
-  gzipped), about thirty times the rest of the page put together. The first
+- **It loads on interaction, never on page load.** The wasm is 4.4 MB (about
+  1.7 MB gzipped), many times the rest of the page put together. The first
   drop, file pick or sample click is what fetches it.
-- **The renderer is told the width it renders for.** `viewportWidth` fits a
-  paged document to the frame and states the factor as `--odr-fit`, so the
-  document opens fitted with no script of ours involved. The zoom bar overrides
-  the `body{zoom}` that carries it. The renderer's own zoom api would do this
-  better, but it is script inside the frame, and the frame runs none: `sandbox`
-  grants `allow-same-origin` (so the bar can reach the document) and withholds
-  `allow-scripts`, which is what keeps a `javascript:` link in a dropped
-  document off this origin.
+- **The frame runs the renderer's scripts, and has no origin.** The iframe is
+  sandboxed with `allow-scripts` and *without* `allow-same-origin`, which is
+  the arrangement core's own readme recommends for untrusted input: the
+  renderer's scripts — the text editor, the cell overlay, the pdf annotator,
+  the zoom — run inside the document, and the document runs in an opaque
+  origin, so a `javascript:` link in a dropped file runs there and reaches
+  nothing of this page. The price is that this page cannot reach in either:
+  `contentDocument` is null. So the one script of ours in the frame,
+  `src/scripts/frame-bridge.js`, is appended to the markup before it mounts
+  and talks to `viewer.ts` over `postMessage` in both directions. It forwards
+  the renderer's `odr.on*` callbacks out, and takes commands in — zoom, the
+  editing mode, a format, a marking tool, and the two requests whose answers a
+  save is made of. It is inlined as a string (`?raw`), so it is plain
+  javascript and must never contain a closing script tag. This is also why
+  `script-src` carries `'unsafe-inline'`; see the notes on `firebase.json`.
+- **The renderer fits and zooms the document itself.** No width is passed to
+  `open`: the css states `--odr-fit: auto`, the renderer's viewport script
+  measures the frame it landed in, refits on a resize or a rotation, and
+  reports every change through `odr.onZoomChange`. The zoom bar sends
+  `setZoom` and `resetZoom` and shows what comes back. Before 7.0.0 the page
+  computed the fit and wrote `body{zoom}` from outside, because the frame ran
+  no script.
 - **A sheet is capped at 50,000 cells.** The markup goes into `srcdoc` as one
   string, so a sheet costs this page's memory rather than a stream the browser
   can page through, and a styled ODS runs ~226 bytes a cell — core's own
@@ -87,22 +103,29 @@ Two things about it are deliberate and easy to undo by accident:
   ordinary 40,000-cell XLSX is untouched and opens in well under a second.
   `sheetCut` says what was left out, and the demo says so above the frame. The
   apps have no such cap.
-- **Links in the frame are rewired from here.** 6.11.0 dropped the blanket
-  `<base target="_blank">`, which is right for a host that serves what it
-  rendered and wrong for this one. A `srcdoc` document resolves urls against
-  *this page*, so a PDF's `#p2` pointed at `https://opendocument.app/#p2` and a
-  click replaced the document with the homepage; an archive entry's relative
-  link went to our 404. Fragments now scroll the frame from the parent — the
-  document is same-origin, the same access the zoom bar needs — and relative
-  links are drawn as text. External links keep `target="_blank"` and stay inert
-  against the missing `allow-popups`.
+- **Links in the frame are rewired by the bridge.** A `srcdoc` document
+  resolves urls against *this page*, so a PDF's `#p2` pointed at
+  `https://opendocument.app/#p2` and a click replaced the document with the
+  homepage; an archive entry's relative link went to our 404. Fragments scroll
+  the frame from inside, relative links are drawn as text, and external links
+  keep `target="_blank"` and stay inert against the missing `allow-popups`.
 - **A format with no signature is asked for by name.** Everything else core
   detects from the bytes. Markdown is the exception — a `.md` is text and reads
   as text — so the demo maps the extension to the type for any format whose
   `detectByContent` is false and which renders. Hard-coding `md` would rot; this
   does not.
 
-The sample document is `public/sample.odt`, hand-written for this page.
+### The samples
+
+`public/samples/` holds one document per format, all the same three pieces of
+content: a text document, a budget sheet with formulas, a three-slide deck and
+a drawing, hand-written as flat ODF and saved by LibreOffice as ODT, DOCX, DOC,
+RTF and PDF; ODS, XLSX, XLS and CSV; ODP, PPTX and PPT; ODG — plus a TXT and an
+MD written by hand, and the DOCX, XLSX and PPTX saved again by Pages, Numbers
+and Keynote. One per format because what the engine can do depends on the
+format it is handed, and the idle panel's chips say so: a pen on the ones that
+edit and save, a marker on the PDF, a tooltip on each. The sources are not
+kept; regenerating one is a `soffice --headless --convert-to` away.
 
 ### Two mounts, one viewer
 
@@ -134,52 +157,73 @@ says so in its `title`.
 The renderer paints its canvas on the document's `body` — white behind
 reflowing text, `#525659` behind paginated pages — and a body background
 normally propagates to the frame's canvas, which is what a rubber-band scroll
-past either end paints. It stops propagating the moment the zoom bar writes
-`zoom` onto that same body, and the overscroll then revealed the frame host's
-own light `bg-surface-container` behind a dark page canvas. The `load` handler
-copies the body's computed background onto the `iframe` element — on the
-element rather than the document's root, so what is shown stays exactly as the
-renderer wrote it.
+past either end paints. It stops propagating the moment a `zoom` is written
+onto that same body, and the overscroll then revealed the frame host's own
+light `bg-surface-container` behind a dark page canvas. The bridge reports the
+body's computed background in its `ready` message and the viewer copies it
+onto the `iframe` element — on the element rather than the document's root, so
+what is shown stays exactly as the renderer wrote it.
 
-### Editing, and how a diff gets out of a frame that runs no script
+### Editing, marking, and what the pen does
 
-6.12.0 bound the other half of the round trip — `edit(diff)`, `save()`,
-`isEditable()` and `isSavable()`
-([core#777](https://github.com/opendocument-app/OpenDocument.core/issues/777)) —
-so the bar has a pen on it. It turns into a disc: the pen opens the document to
-typing, the disc hands the typing back to the engine and downloads the document
-the engine writes. Both viewers get it, because both are the same script around
-the same bar.
+Core 7.0.0 made editing one mode every format shares
+([`docs/design/editing.md`](https://github.com/opendocument-app/OpenDocument.core/blob/main/docs/design/editing.md)
+in the core repository): the render writes an address on every run and
+paragraph, `odr.editing` on the page owns the mode, the operation log, undo
+and the refusals, and each format attaches its own editor — the caret editor
+for a text document (with bold, italic, underline, strikethrough, highlight,
+colour and size), the cell overlay for a sheet. A pdf has `odr.annotation`
+instead: five kinds of mark, drawn in the page, written into the file by
+`annotate()` as an incremental update. The bar has a pen and a disc for all of
+it.
 
-- **The pen only appears where an edit can be saved.** `odr.fileTypes()` reports
-  `edit` and `save` for odt, odp, odg and docx; ods can be saved but not edited,
-  and everything else neither. The type is looked up before `open`, so
-  `editable: true` — which writes `contenteditable` and a `data-odr-path` onto
-  every text run — is only asked for where it leads somewhere. After opening,
-  `isEditable()` and `isSavable()` answer for the document itself and settle it.
-- **Edit mode is an attribute toggle, not a second render.** The renderer's
-  editable output is editable the moment it mounts, which is not a mode anyone
-  asked for — on a phone a tap meant to scroll would raise the keyboard over a
-  document being read. So the `load` handler writes `contenteditable="false"`
-  across the frame and the pen writes it back to `true`. Re-rendering for a
-  second config would cost the scroll position, the zoom and the frame.
-- **The diff is collected from this side.** The renderer ships an
-  `odr.generateDiff()` that watches the document and reports the text of every
-  run that changed. It never runs — the frame is given `allow-same-origin` and
-  not `allow-scripts` — so a `MutationObserver` in the parent realm does the
-  same job through the same access the zoom bar uses, attributing a change to
-  the nearest `[data-odr-path]` ancestor. `childList` counts as well as
-  `characterData`: emptying a run removes its text node rather than shortening
-  it. `Enter` is refused the way the renderer's own script refuses it — the diff
-  carries text, and a new line is structure — and `Escape` leaves edit mode
-  without writing a file, which one button doing both jobs otherwise has no way
-  out of.
-- **A save is a download.** There is no file behind the document, only the bytes
-  that were dropped, so `save()` goes into a `blob:` and out through an `<a
-  download>` under the name it was opened as. Nothing is uploaded here either.
-- **Unsaved edits are warned about once.** Closing the document, or opening
-  another, says so above the frame and lets the second attempt through. The page
-  blocks on no dialog.
+- **The pen only appears where a change can be saved.** `odr.fileTypes()`
+  reports `edit` and `save` for odt, odp, odg, docx, pptx, ods, xlsx and txt,
+  and `annotate` for pdf. The type is looked up before `open`, so `editable:
+  true` — which writes the addresses and the editor script — is only asked for
+  where it leads somewhere. After opening, `isEditable()`/`isSavable()` and
+  `isAnnotatable()` answer for the document itself, and the bridge's `ready`
+  message answers for the markup that was actually rendered. Any of them
+  saying no is the same honest thing: no pen. txt is one of those: the engine
+  can edit and save a plain file, but the npm package routes `isEditable` and
+  `save` through the document and throws `NoDocumentFile` for one.
+- **The mode starts off, and the pen turns it on in the frame.** The rendered
+  markup is not editable on sight — 7.0.0's `editable` writes scaffolding, and
+  `odr.editing.enable()` is what writes `contenteditable`. The pen sends
+  `edit`, the page answers with `onEditModeChange`, and that answer is what
+  flips the button; a refused `enable()` comes back the same way with a
+  reason. For a pdf the pen only shows the marking tools, and the button flips
+  here, because the annotator has no mode to report. Escape inside the frame
+  sends the mode off, unless something in the frame took the key first.
+- **The strip under the bar is the host's buttons.** For a text document:
+  bold, italic, underline, strikethrough, a text colour, a highlight with a
+  colour of its own, and a size, each a `toggle` or a `format` sent to the
+  page, with `onSelectionChange` painting what the selection has. For a pdf:
+  the five tools, each with a colour of its own. With text selected, a tool
+  marks it once; without a selection, a press arms the tool and a second press
+  disarms it. A second press on a colour's arrow closes its picker. Undo and
+  redo for both, driven by `onEditChange`; a pdf has undo only. A sheet gets
+  no buttons — the cells are the editor — and a hint instead. The buttons
+  cancel their `mousedown` so the frame keeps the focus and the selection.
+- **A refusal is a sentence of ours.** The page reports a reason and a message
+  meant for a console; `REFUSALS` in the viewer holds the wording a visitor
+  sees, keyed by reason, because a host owns the wording. A sheet's stale
+  formula cells come through `onCellsStale` and get a persistent note of their
+  own: writing a cell takes the cached result of every formula reading it
+  away, and the saved file leaves them for a spreadsheet app to recompute.
+- **A save is two questions and a download.** `getOperations` or
+  `getAnnotations` goes into the frame, the envelope comes back as a json
+  string, and it goes into `edit()` + `save()` or into `annotate()` as that
+  string — the package's readme says `edit` takes the object, but the binding
+  is a `std::string` and an object throws `BindingError`, in 7.0.0 as in
+  6.12.0. The bytes go into a `blob:` and out through an `<a download>` under
+  the name the document was opened as. After an edit is saved, `committed`
+  resets the page's log; after a pdf is saved, the marks stay pending, because
+  `annotate()` writes onto the original bytes and a second save has to carry
+  them all again.
+- **Unsaved changes are warned about once.** Closing the document, or opening
+  another, says so above the frame and lets the second attempt through. The
+  page blocks on no dialog.
 
 ## Deployment
 
@@ -199,12 +243,18 @@ The workflow needs one repository secret:
 
 JSON has no comments, so the reasoning lives here:
 
-- **`script-src` allows `'wasm-unsafe-eval'`.** Compiling the module needs it
-  and nothing more: odr-core is linked with emscripten's
-  `-sDYNAMIC_EXECUTION=0` as of 6.10.0, so embind builds its invokers without
-  `new Function` and the `'unsafe-eval'` this used to carry is gone. It is what
-  refuses the renderer's own inline scripts inside the frame, too — see the
-  demo.
+- **`script-src` allows `'wasm-unsafe-eval'` and `'unsafe-inline'`.** The
+  first compiles the module and nothing more: odr-core is linked with
+  emscripten's `-sDYNAMIC_EXECUTION=0`, so embind builds its invokers without
+  `new Function`. The second is for the frame, which inherits this policy:
+  the renderer writes its scripts inline into every document — the editor,
+  the annotator, the zoom — and the bridge is inline too, so refusing inline
+  script is refusing everything the pen does. It could not be narrowed to
+  hashes, because the frame has an opaque origin and a `blob:` or `'self'`
+  script would not load there. The page itself has no inline script: Astro
+  bundles its own. What `'unsafe-inline'` also permits, a `javascript:` url
+  in a dropped document, runs in the frame's opaque origin and reaches
+  nothing — see the demo.
 - **`frame-src blob:`** is left over from the `blob:` URL the demo used to
   mount a document with; it goes in through `srcdoc` now, which needs nothing
   from this directive. Harmless, and untested to remove — the demo is what

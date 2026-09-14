@@ -41,6 +41,17 @@ const icons = {
   upload: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12',
   mail: 'M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm18 2-10 7L2 6',
   close: 'M18 6 6 18M6 6l12 12',
+  chevron: 'm6 9 6 6 6-6',
+  undo: 'M3 7v6h6M21 17a9 9 0 0 0-15-6.7L3 13',
+  redo: 'M21 7v6h-6M3 17a9 9 0 0 1 15-6.7L21 13',
+  /* A marker pen, for a document that takes marks rather than edits. */
+  highlighter: 'm9 11-6 6v3h9l3-3M22 12l-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4l8 8Z',
+  /* The marks a pdf takes: a letter over its line, a line through a letter, a
+     letter over a wave, and a free stroke. */
+  underline: 'M7 3v6a5 5 0 0 0 10 0V3M4 20h16',
+  strike: 'M16 4H9a3 3 0 0 0-2.83 4M14 12a4 4 0 0 1 0 8H6M4 12h16',
+  squiggle: 'M7 3v6a5 5 0 0 0 10 0V3M3 20c1.5-1.5 3-1.5 4.5 0s3 1.5 4.5 0 3-1.5 4.5 0 3 1.5 4.5 0',
+  scribble: 'M3 17c2-4 4.5-9 6.5-8.5S8 16 10.5 16.5 15 10 17 10.5 15 17 21 15',
 } as const;
 
 const isFilled = filled.has(name);

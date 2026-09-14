@@ -1,11 +1,15 @@
 ---
 /*
-  The bar above a mounted document: what is open, the zoom, and the way out.
-  The demo puts it inside its own frame, which is hidden until something
-  renders; `/tryit` uses it as the page's only bar, where the mark on the left
-  has to stay put and everything about the document has to come and go. So the
-  document half carries `data-viewer-open` and the script toggles it, which the
-  demo pays nothing for - there it is inside a box that was hidden anyway.
+  The bar above a mounted document: what is open, the zoom, the pen and the
+  disc, and the way out. Under it, the strip of tools the pen opens - formatting
+  for a text document, the marking tools for a pdf - which is hidden until the
+  pen is pressed and empty for a sheet, where the cells are the tools.
+
+  The demo puts all of it inside its own frame, which is hidden until something
+  renders; `/tryit` uses the bar as the page's only bar, where the mark on the
+  left has to stay put and everything about the document has to come and go. So
+  the document half carries `data-viewer-open` and the script toggles it, which
+  the demo pays nothing for - there it is inside a box that was hidden anyway.
 */
 import Icon from '../Icon.astro';
 
@@ -15,6 +19,30 @@ interface Props {
 const {
   class: className = 'border-b border-outline-variant bg-surface-container px-4 py-2.5',
 } = Astro.props;
+
+const swatch =
+  'relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-surface';
+const chevron =
+  'relative -ml-0.5 flex h-7 w-4 shrink-0 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface';
+const round =
+  'flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-outline transition-colors hover:bg-surface disabled:opacity-40 disabled:hover:bg-transparent';
+const tool =
+  'flex h-7 min-w-7 shrink-0 items-center justify-center rounded-full border border-transparent px-1.5 text-sm leading-none transition-colors hover:bg-surface aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-on-primary disabled:opacity-40';
+
+/* Point sizes a document commonly uses; the select shows the selection's own
+   size where it is one of these and nothing where it is not. */
+const sizes = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48];
+
+/* The five kinds of mark a pdf takes, in the annotator's own names, each with
+   the colour it starts with: a wash for the highlighter, red for the three
+   lines, blue ink for the pen. */
+const marks = [
+  { tool: 'highlight', label: 'Highlight', icon: 'highlighter', color: '#ffe633' },
+  { tool: 'underline', label: 'Underline', icon: 'underline', color: '#e53935' },
+  { tool: 'strikeOut', label: 'Strike out', icon: 'strike', color: '#e53935' },
+  { tool: 'squiggly', label: 'Squiggly underline', icon: 'squiggle', color: '#e53935' },
+  { tool: 'ink', label: 'Draw', icon: 'scribble', color: '#1e88e5' },
+] as const;
 ---
 
 <div class:list={['flex items-center gap-3', className]}>
@@ -24,43 +52,40 @@ const {
     <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-brand-sheet"></span>
     <p data-viewer-filename class="min-w-0 flex-1 truncate text-sm font-medium"></p>
 
-    <!-- The renderer fits the document to the width it is rendered for, and
-         answers for the zoom after that through a script the frame does not get
-         to run. A phone cannot pinch an iframe either, so these drive the zoom
-         from outside. -->
+    <!-- The renderer's own viewport script zooms the document and reports the
+         factor back; these buttons only ask. A phone cannot pinch an iframe,
+         which is why they exist at all. -->
     <div data-viewer-zoom hidden class="flex shrink-0 items-center gap-0.5">
-      <button
-        data-viewer-zoom-out
-        type="button"
-        aria-label="Zoom out"
-        class="flex h-7 w-7 items-center justify-center rounded-full border border-outline text-sm leading-none transition-colors hover:bg-surface disabled:opacity-40"
-      >&minus;</button>
+      <button data-viewer-zoom-out type="button" aria-label="Zoom out" class={round}
+        >&minus;</button
+      >
       <button
         data-viewer-zoom-level
         type="button"
         title="Fit to width"
         class="min-w-[3.25rem] rounded-full px-1 py-1 text-xs font-medium tabular-nums transition-colors hover:bg-surface"
       >100%</button>
-      <button
-        data-viewer-zoom-in
-        type="button"
-        aria-label="Zoom in"
-        class="flex h-7 w-7 items-center justify-center rounded-full border border-outline text-sm leading-none transition-colors hover:bg-surface disabled:opacity-40"
-      >+</button>
+      <button data-viewer-zoom-in type="button" aria-label="Zoom in" class={round}>+</button>
     </div>
 
-    <!-- Hidden until a document that can be edited *and* saved is open; the
-         pen turns into a disc, and the disc is what writes the file out. See
-         the viewer script - editing happens in the frame's own dom, and the
-         engine takes it back as a diff. -->
+    <!-- Hidden until a document that can be changed *and* written back out is
+         open. The pen opens the document to typing, or to marking where it is
+         a pdf; the disc beside it hands the changes to the engine and downloads
+         the file it writes. See the viewer script. -->
+    <button data-viewer-pen hidden type="button" class={round}>
+      <span data-viewer-pen-edit class="flex"><Icon name="pencil" class="h-4 w-4" /></span>
+      <span data-viewer-pen-mark hidden class="flex"><Icon name="highlighter" class="h-4 w-4" /></span>
+    </button>
     <button
-      data-viewer-edit
+      data-viewer-save
       hidden
+      disabled
       type="button"
-      class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-outline transition-colors hover:bg-surface disabled:opacity-40"
+      title="Save this document with your changes"
+      aria-label="Save this document with your changes"
+      class={round}
     >
-      <span data-viewer-edit-pen class="flex"><Icon name="pencil" class="h-4 w-4" /></span>
-      <span data-viewer-edit-disc hidden class="flex"><Icon name="save" class="h-4 w-4" /></span>
+      <Icon name="save" class="h-4 w-4" />
     </button>
 
     <slot name="trailing" />
@@ -72,19 +97,114 @@ const {
       type="button"
       aria-label="Close this document and open another"
       title="Close this document and open another"
-      class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-outline transition-colors hover:bg-surface"
+      class={round}
     >
       <Icon name="close" class="h-4 w-4" />
     </button>
   </div>
 </div>
 
+<!-- What the pen opens. Every group is hidden until the document says it
+     applies; the hint says what to do with the frame below. -->
+<div
+  data-viewer-tools
+  hidden
+  class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-outline-variant bg-surface-container px-3 py-1.5 sm:px-4"
+>
+  <div data-viewer-format hidden class="flex items-center gap-0.5">
+    <button data-viewer-style="bold" type="button" title="Bold (Ctrl+B)" aria-pressed="false" class={tool}
+      ><span class="font-bold">B</span></button
+    >
+    <button data-viewer-style="italic" type="button" title="Italic (Ctrl+I)" aria-pressed="false" class={tool}
+      ><span class="italic">I</span></button
+    >
+    <button data-viewer-style="underline" type="button" title="Underline (Ctrl+U)" aria-pressed="false" class={tool}
+      ><span class="underline">U</span></button
+    >
+    <button data-viewer-style="strikethrough" type="button" title="Strikethrough" aria-pressed="false" class={tool}
+      ><span class="line-through">S</span></button
+    >
+    <!-- The colour of the text: an A over a bar in that colour, with the
+         picker laid invisibly on top, so a click anywhere on it opens it. -->
+    <label title="Text colour" class={swatch}>
+      <span class="sr-only">Text colour</span>
+      <span aria-hidden="true" class="flex flex-col items-center text-sm font-semibold leading-none">
+        A<span data-viewer-color-bar class="mt-0.5 h-1 w-4 rounded-sm ring-1 ring-outline-variant"></span>
+      </span>
+      <input data-viewer-color type="color" value="#191c1e" class="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+    </label>
+    <!-- The highlight and its own colour, as a split button: the button turns
+         it on and off, and the arrow next to it picks the colour it uses. -->
+    <button data-viewer-highlight type="button" title="Highlight" aria-pressed="false" class={tool}>
+      <span aria-hidden="true" class="flex flex-col items-center">
+        <Icon name="highlighter" class="h-3.5 w-3.5" />
+        <span data-viewer-highlight-bar class="mt-0.5 h-1 w-4 rounded-sm"></span>
+      </span>
+    </button>
+    <label title="Highlight colour" class={chevron}>
+      <span class="sr-only">Highlight colour</span>
+      <Icon name="chevron" class="h-3 w-3" />
+      <input data-viewer-highlight-color type="color" value="#fff59d" class="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+    </label>
+    <select
+      data-viewer-size
+      title="Font size"
+      class="ml-1 h-6 cursor-pointer rounded-md border border-transparent bg-transparent py-0 pl-1.5 pr-1 text-xs text-on-surface-variant transition-colors hover:bg-surface"
+    >
+      <option value="">Size</option>
+      {sizes.map((s) => <option value={`${s}pt`}>{s} pt</option>)}
+    </select>
+  </div>
+
+  <!-- Every marking tool is the split button the document's highlight is:
+       the tool with a bar in its colour, and the arrow that picks it. The
+       viewer paints each bar from its input. -->
+  <div data-viewer-mark hidden class="flex flex-wrap items-center gap-x-1 gap-y-0.5">
+    {
+      marks.map((m) => (
+        <span class="flex items-center">
+          <button data-viewer-tool={m.tool} type="button" title={m.label} aria-label={m.label} aria-pressed="false" class={tool}>
+            <span aria-hidden="true" class="flex flex-col items-center">
+              <Icon name={m.icon} class="h-3.5 w-3.5" />
+              <span data-viewer-tool-bar={m.tool} class="mt-0.5 h-1 w-4 rounded-sm" />
+            </span>
+          </button>
+          <label title={`${m.label} colour`} class={chevron}>
+            <span class="sr-only">{m.label} colour</span>
+            <Icon name="chevron" class="h-3 w-3" />
+            <input data-viewer-tool-color={m.tool} type="color" value={m.color} class="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+          </label>
+        </span>
+      ))
+    }
+  </div>
+
+  <div class="flex items-center gap-0.5">
+    <button data-viewer-undo type="button" disabled title="Undo (Ctrl+Z)" aria-label="Undo" class={tool}>
+      <Icon name="undo" class="h-4 w-4" />
+    </button>
+    <button data-viewer-redo type="button" disabled title="Redo (Ctrl+Y)" aria-label="Redo" class={tool}>
+      <Icon name="redo" class="h-4 w-4" />
+    </button>
+  </div>
+
+  <p data-viewer-tools-hint class="min-w-0 flex-1 truncate text-xs text-on-surface-variant"></p>
+</div>
+
 <!-- What went wrong with an edit, and the one warning before edits nobody
-     saved are thrown away. Above the cut note, because it is news. -->
+     saved are thrown away. Above the notes, because it is news. -->
 <p
   data-viewer-alert
   hidden
-  class="shrink-0 border-b border-outline-variant bg-red-50 px-4 py-2 text-xs leading-relaxed text-red-700 dark:bg-red-950/40 dark:text-red-300"
+  class="shrink-0 border-b border-outline-variant px-4 py-2 text-xs leading-relaxed"
+>
+</p>
+
+<!-- The formula cells an edit left out of date; stays up while there are any. -->
+<p
+  data-viewer-stale
+  hidden
+  class="shrink-0 border-b border-outline-variant bg-surface-variant/40 px-4 py-2 text-xs leading-relaxed text-on-surface-variant"
 >
 </p>
 
