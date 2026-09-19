@@ -257,6 +257,8 @@ export function mountViewer({
   let canEdit = false;
   let canFormat = false;
   let canMark = false;
+  /** A plain text file: it takes typing, but it has no styles to format. */
+  let plainText = false;
   /** Whether the pen has been pressed: edit mode, or the marking tools shown. */
   let modeOn = false;
   /** The tool the frame reports as armed, which is what the buttons show. */
@@ -470,7 +472,9 @@ export function mountViewer({
       ? 'Select text, then a tool, to mark it once. A pressed tool marks every selection; Draw draws on the page.'
       : canFormat
         ? 'Type into the document. Select some text for the buttons, or Ctrl+B, I and U.'
-        : 'Double-click a cell, or just start typing into it. Enter keeps the value, Escape drops it.';
+        : plainText
+          ? 'Type into the file. It is plain text, so it saves as UTF-8 with no styles.'
+          : 'Double-click a cell, or just start typing into it. Enter keeps the value, Escape drops it.';
   }
 
   /* The buttons show what the selection has, as the page reports it: a key
@@ -503,7 +507,7 @@ export function mountViewer({
     showAlert(null);
     if (canMark) {
       modeOn = on;
-      if (!on) sendTool(null, false);
+      if (!on) sendTool(null);
       paintChrome();
     } else if (canEdit) {
       send({ type: 'edit', on });
@@ -516,9 +520,9 @@ export function mountViewer({
     return toolColors.find((i) => i.dataset.viewerToolColor === tool)?.value ?? '#000000';
   }
 
-  function sendTool(tool: string | null, toggle: boolean, recolor = false) {
+  function sendTool(tool: string | null, recolor = false) {
     const color = tool ? rgbOf(colorOf(tool)) : null;
-    send({ type: 'tool', tool, color, width: INK_WIDTH, toggle, recolor });
+    send({ type: 'tool', tool, color, width: INK_WIDTH, recolor });
   }
 
   /*
@@ -549,9 +553,9 @@ export function mountViewer({
     download. The frame keeps what it holds either way, so a failure costs the
     visitor nothing but the file.
 
-    Both envelopes are json strings and stay strings: the package's readme says
-    `edit` takes the object, but the binding underneath is a `std::string` and
-    an object throws `BindingError` there - in 7.0.0 as in 6.12.0.
+    Both envelopes are json strings and stay strings: the binding underneath is
+    a `std::string`, and an object throws `BindingError` there. A plain text
+    file takes the same calls since core 7.1.0, with a log of one `setContent`.
   */
   async function saveDocument() {
     if (!currentDoc) return;
@@ -606,6 +610,7 @@ export function mountViewer({
     canEdit = false;
     canFormat = false;
     canMark = false;
+    plainText = false;
     editDirty = false;
     canUndo = false;
     canRedo = false;
@@ -685,7 +690,7 @@ export function mountViewer({
         // The engine answered for the format and the document; the page
         // answers for the markup it was actually given.
         canEdit = canEdit && m.editable === true;
-        canFormat = canEdit && !m.sheet;
+        canFormat = canEdit && !m.sheet && !plainText;
         canMark = canMark && m.annotatable === true;
         paintZoom(m.zoom);
         zoomBar.hidden = false;
@@ -786,6 +791,7 @@ export function mountViewer({
     const markableFormat = Boolean(info?.capabilities?.annotate);
     currentMime = info?.mimeTypes?.[0] ?? 'application/octet-stream';
     currentName = name;
+    plainText = info?.category === odr.enums.FileCategory.text;
 
     // No width: the renderer's viewport script measures the frame it lands in
     // and refits on a resize, which a width guessed here could not follow.
@@ -816,10 +822,8 @@ export function mountViewer({
 
     /*
       `capabilities()` answers for the format, the document for itself: a pdf
-      whose cross-reference table had to be rebuilt takes no marks, and a
-      plain text file - which the engine can edit and save - is not a document
-      to this package, so the questions throw rather than answer. Asking in a
-      net turns both into the same honest thing: no pen.
+      whose cross-reference table had to be rebuilt takes no marks. Asking in a
+      net turns a question that throws into the same honest thing: no pen.
     */
     canEdit = editableFormat && answers(() => currentDoc.isEditable() && currentDoc.isSavable());
     canMark = markableFormat && answers(() => currentDoc.isAnnotatable());
@@ -1001,11 +1005,11 @@ export function mountViewer({
   /*
     A tool button: with text selected in the frame it marks that selection
     once and leaves no tool armed; pressed while armed it disarms; otherwise it
-    arms. The frame decides, because only it can see the selection, and it
-    reports back what is armed.
+    arms. The frame decides, because only it can see the selection: the
+    annotator's `press` does it, and the frame reports back what is armed.
   */
   for (const b of toolBtns) {
-    b.addEventListener('click', () => sendTool(b.dataset.viewerTool ?? 'highlight', true));
+    b.addEventListener('click', () => sendTool(b.dataset.viewerTool ?? 'highlight'));
   }
 
   /*
@@ -1065,7 +1069,7 @@ export function mountViewer({
   for (const input of toolColors) {
     const tool = input.dataset.viewerToolColor ?? '';
     const bar = toolBars.find((b) => b.dataset.viewerToolBar === tool);
-    colourControl(input, bar, () => sendTool(tool, false, true));
+    colourControl(input, bar, () => sendTool(tool, true));
   }
   undoBtn.addEventListener('click', () => send({ type: 'undo' }));
   redoBtn.addEventListener('click', () => send({ type: 'redo' }));

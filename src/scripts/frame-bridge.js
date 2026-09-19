@@ -86,29 +86,15 @@
     post({ type: 'error', code: code, message: message });
   };
 
-  /*
-    The annotator has no callback of its own, so the count of pending marks is
-    reported after every gesture that can change it. A mark taken from a
-    selection settles 50ms after the pointer lifts; this waits a little longer.
-  */
-  var reportedMarks = -1;
-  function reportMarks() {
-    if (!annotation) return;
-    var count = annotation.list().length;
-    if (count === reportedMarks) return;
-    reportedMarks = count;
-    post({ type: 'marks', count: count });
-  }
-  function reportMarksSoon() {
-    window.setTimeout(reportMarks, 120);
-  }
   if (annotation) {
+    // The annotator reports the count of pending marks after each change: a
+    // mark, a finished stroke, an undo, a removal and a clear.
+    odr.onAnnotationChange = function (/** @type {{count: number}} */ event) {
+      post({ type: 'marks', count: event.count });
+    };
     // A selection marks itself with the armed tool, which is what a touch
     // screen needs: there is no button to press with a selection standing.
     annotation.setOptions({ markOnSelection: true });
-    document.addEventListener('pointerup', reportMarksSoon);
-    document.addEventListener('pointercancel', reportMarksSoon);
-    document.addEventListener('selectionchange', reportMarksSoon);
   }
 
   /*
@@ -139,64 +125,34 @@
     setZoom(1);
   }
 
-  function hasSelection() {
-    var selection = window.getSelection();
-    return !!selection && !selection.isCollapsed && selection.toString().length > 0;
-  }
-
-  /* Marks the selection once with @p tool, and leaves no tool armed. */
-  /** @param {number[]} rgb */
-  function markOnce(/** @type {string} */ tool, rgb, /** @type {number} */ width) {
-    if (rgb) annotation.setColor(rgb);
-    if (width) annotation.setWidth(width);
-    annotation.setTool(tool);
-    annotation.mark();
-    // Disarmed before the selection is cleared, so the clear cannot mark it
-    // a second time.
-    annotation.setTool(null);
-    var selection = window.getSelection();
-    if (selection) selection.removeAllRanges();
-    reportMarks();
-  }
-
   /*
     A tool button does one of three things, and only the frame can tell which,
-    because only the frame can see the selection. With text selected, the tool
-    marks that selection once, and then no tool stays armed. Without a
-    selection, a press arms the tool, and a second press disarms it. An armed
-    tool marks every selection as it is made. The pen sends the same message
-    without `toggle`, so it disarms outright.
+    because only the frame can see the selection. The annotator's `press`
+    decides: with text selected, the tool marks that selection once, and then
+    no tool stays armed. Without a selection, a press arms the tool, and a
+    second press disarms it. An armed tool marks every selection as it is
+    made. The pen sends `null`, so it disarms outright.
 
-    A new colour for a tool (`recolor`) acts as the document editor's
-    highlight colour does: it marks a selection once, and it recolours the
-    tool if the tool is armed. Otherwise the page only keeps the colour.
+    A new colour for a tool goes to `recolor`, which acts as the document
+    editor's highlight colour does: it marks a selection once, and it
+    recolours the tool if the tool is armed. Otherwise the page only keeps the
+    colour.
   */
-  /** @param {number[]} rgb */
+  /** @param {number[] | null} rgb */
   function setTool(
     /** @type {string | null} */ tool,
     rgb,
     /** @type {number} */ width,
-    /** @type {boolean} */ toggle,
     /** @type {boolean} */ recolor
   ) {
     if (!annotation) return;
-    var armed = annotation.getTool();
-    var selected = !!tool && tool !== 'ink' && hasSelection();
-    if (recolor) {
-      if (selected) {
-        markOnce(/** @type {string} */ (tool), rgb, width);
-      } else if (tool && tool === armed && rgb) {
-        annotation.setColor(rgb);
-      }
-    } else if (toggle && selected) {
-      markOnce(/** @type {string} */ (tool), rgb, width);
-    } else if (tool && tool === armed && toggle) {
-      annotation.setTool(null);
-    } else {
-      if (rgb) annotation.setColor(rgb);
-      if (width) annotation.setWidth(width);
-      annotation.setTool(tool);
-    }
+    /** @type {{color?: number[], width?: number}} */
+    var style = {};
+    if (rgb) style.color = rgb;
+    if (width) style.width = width;
+    if (recolor) annotation.recolor(tool, style);
+    else if (tool) annotation.press(tool, style);
+    else annotation.setTool(null);
     post({ type: 'tool', armed: annotation.getTool() });
   }
 
@@ -217,7 +173,6 @@
       case 'undo':
         if (annotation) {
           annotation.undo();
-          reportMarks();
         } else if (editing) {
           editing.undo();
         }
@@ -238,7 +193,7 @@
         if (editing) editing.committed();
         break;
       case 'tool':
-        setTool(m.tool || null, m.color, m.width, m.toggle === true, m.recolor === true);
+        setTool(m.tool || null, m.color, m.width, m.recolor === true);
         break;
       case 'getAnnotations':
         post({

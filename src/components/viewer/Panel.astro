@@ -22,10 +22,6 @@ const { class: className = 'p-6 sm:p-10', zoneClass = '' } = Astro.props;
   .doc can be edited here gets the answer before the wasm has loaded. The
   iWork three are the docx, xlsx and pptx saved again by Pages, Numbers and
   Keynote, with the preview pictures those apps pack in stripped out.
-
-  txt is listed as read-only although the engine can edit and save one: the
-  npm package has no save path for a plain file yet, so the pen would open a
-  document the disc could not write.
 */
 type Does = 'edit' | 'mark' | 'read';
 const samples: { ext: string; tone: 'text' | 'sheet' | 'slide' | 'plain'; does: Does }[] = [
@@ -43,7 +39,7 @@ const samples: { ext: string; tone: 'text' | 'sheet' | 'slide' | 'plain'; does: 
   { ext: 'xls', tone: 'sheet', does: 'read' },
   { ext: 'ppt', tone: 'slide', does: 'read' },
   { ext: 'csv', tone: 'sheet', does: 'read' },
-  { ext: 'txt', tone: 'plain', does: 'read' },
+  { ext: 'txt', tone: 'plain', does: 'edit' },
   { ext: 'rtf', tone: 'text', does: 'read' },
   { ext: 'pages', tone: 'text', does: 'read' },
   { ext: 'numbers', tone: 'sheet', does: 'read' },

@@ -172,8 +172,8 @@ in the core repository): the render writes an address on every run and
 paragraph, `odr.editing` on the page owns the mode, the operation log, undo
 and the refusals, and each format attaches its own editor — the caret editor
 for a text document (with bold, italic, underline, strikethrough, highlight,
-colour and size), the cell overlay for a sheet. A pdf has `odr.annotation`
-instead: five kinds of mark, drawn in the page, written into the file by
+colour and size), the cell overlay for a sheet, a plain editor for a txt. A
+pdf has `odr.annotation` instead: five kinds of mark, drawn in the page, written into the file by
 `annotate()` as an incremental update. The bar has a pen and a disc for all of
 it.
 
@@ -184,26 +184,31 @@ it.
   where it leads somewhere. After opening, `isEditable()`/`isSavable()` and
   `isAnnotatable()` answer for the document itself, and the bridge's `ready`
   message answers for the markup that was actually rendered. Any of them
-  saying no is the same honest thing: no pen. txt is one of those: the engine
-  can edit and save a plain file, but the npm package routes `isEditable` and
-  `save` through the document and throws `NoDocumentFile` for one.
+  saying no is the same honest thing: no pen. Since 7.1.0 a txt answers the
+  same calls as a document: its log is one `setContent` with the whole text,
+  and `save()` writes UTF-8.
 - **The mode starts off, and the pen turns it on in the frame.** The rendered
   markup is not editable on sight — 7.0.0's `editable` writes scaffolding, and
   `odr.editing.enable()` is what writes `contenteditable`. The pen sends
   `edit`, the page answers with `onEditModeChange`, and that answer is what
   flips the button; a refused `enable()` comes back the same way with a
   reason. For a pdf the pen only shows the marking tools, and the button flips
-  here, because the annotator has no mode to report. Escape inside the frame
-  sends the mode off, unless something in the frame took the key first.
+  here, because the annotator has no mode to report. It reports the count of
+  pending marks on `odr.onAnnotationChange` instead, and that count drives
+  undo and the disc. Escape inside the frame sends the mode off, unless
+  something in the frame took the key first.
 - **The strip under the bar is the host's buttons.** For a text document:
   bold, italic, underline, strikethrough, a text colour, a highlight with a
   colour of its own, and a size, each a `toggle` or a `format` sent to the
   page, with `onSelectionChange` painting what the selection has. For a pdf:
   the five tools, each with a colour of its own. With text selected, a tool
   marks it once; without a selection, a press arms the tool and a second press
-  disarms it. A second press on a colour's arrow closes its picker. Undo and
-  redo for both, driven by `onEditChange`; a pdf has undo only. A sheet gets
-  no buttons — the cells are the editor — and a hint instead. The buttons
+  disarms it. Core owns that logic since 7.1.0: a button calls
+  `odr.annotation.press`, and a new colour calls `odr.annotation.recolor`. A
+  second press on a colour's arrow closes its picker. Undo and redo for both,
+  driven by `onEditChange`; a pdf has undo only. A sheet gets no buttons — the
+  cells are the editor — and a hint instead. A txt gets a hint too, because
+  plain text has no styles. The buttons
   cancel their `mousedown` so the frame keeps the focus and the selection.
 - **A refusal is a sentence of ours.** The page reports a reason and a message
   meant for a console; `REFUSALS` in the viewer holds the wording a visitor
@@ -214,9 +219,8 @@ it.
 - **A save is two questions and a download.** `getOperations` or
   `getAnnotations` goes into the frame, the envelope comes back as a json
   string, and it goes into `edit()` + `save()` or into `annotate()` as that
-  string — the package's readme says `edit` takes the object, but the binding
-  is a `std::string` and an object throws `BindingError`, in 7.0.0 as in
-  6.12.0. The bytes go into a `blob:` and out through an `<a download>` under
+  string, because the binding is a `std::string` and an object throws
+  `BindingError`. The bytes go into a `blob:` and out through an `<a download>` under
   the name the document was opened as. After an edit is saved, `committed`
   resets the page's log; after a pdf is saved, the marks stay pending, because
   `annotate()` writes onto the original bytes and a second save has to carry
