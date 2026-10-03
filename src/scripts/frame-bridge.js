@@ -12,6 +12,12 @@
   viewer imports it as a string and writes it into the markup before mounting.
   Nothing here may spell a closing script tag, which would end the inline
   block early.
+
+  The page's own callbacks do not pass through here. The viewer renders with
+  `hostMessageHandler: 'odrHost.post'`, and the renderer's `host-bridge.js`
+  sends every `odr.on*` callback to that function as one JSON string. The
+  viewer writes `odrHost` into the head, so it exists before the renderer's
+  scripts run, and no callback is lost before this script runs.
 */
 (function () {
   'use strict';
@@ -31,27 +37,19 @@
 
   /*
     A `srcdoc` document resolves urls against the page that holds it, so a
-    pdf's `#p2` points at the page's own url and a click would navigate the
-    frame onto the homepage; an archive entry's relative link would land on
-    the 404. Fragments are scrolled here, where they are meant; relative links
-    are drawn as text; external links keep `target="_blank"` and stay inert
-    against the sandbox's missing `allow-popups`.
+    pdf's `#p2` points at the page's own url, and a click would navigate the
+    frame onto the homepage. This script scrolls a fragment in the frame. The
+    renderer removes the `href` of a relative link, and it gives an external
+    link `target="_blank"`, which the sandbox keeps inert because it has no
+    `allow-popups`.
   */
-  var anchors = document.querySelectorAll('a[href]');
+  var anchors = document.querySelectorAll('a[href^="#"]');
   for (var i = 0; i < anchors.length; ++i) {
     var a = /** @type {HTMLAnchorElement} */ (anchors[i]);
-    var href = a.getAttribute('href');
-    if (!href) continue;
-    if (href.charAt(0) === '#') {
-      a.removeAttribute('href');
-      a.style.cursor = 'pointer';
-      a.addEventListener('click', onFragment(href.slice(1)));
-      continue;
-    }
-    if (a.target === '_blank') continue;
+    var href = a.getAttribute('href') || '';
     a.removeAttribute('href');
-    a.title = 'This demo renders one document. Opening what it links to is what the apps do.';
-    a.style.cursor = 'default';
+    a.style.cursor = 'pointer';
+    a.addEventListener('click', onFragment(href.slice(1)));
   }
 
   /** @param {string} id */
@@ -63,40 +61,6 @@
     };
   }
 
-  /* The page's callbacks, forwarded whole: the page owns the wording. */
-  odr.onEditModeChange = function (/** @type {unknown} */ event) {
-    post({ type: 'editMode', event: event });
-  };
-  odr.onEditChange = function (/** @type {unknown} */ event) {
-    post({ type: 'editChange', event: event });
-  };
-  odr.onEditRefused = function (/** @type {unknown} */ event) {
-    post({ type: 'editRefused', event: event });
-  };
-  odr.onCellsStale = function (/** @type {unknown} */ event) {
-    post({ type: 'cellsStale', event: event });
-  };
-  odr.onSelectionChange = function (/** @type {unknown} */ style) {
-    post({ type: 'selection', style: style });
-  };
-  odr.onZoomChange = function (/** @type {number} */ zoom, /** @type {boolean} */ fitted) {
-    post({ type: 'zoom', zoom: zoom, fitted: fitted });
-  };
-  odr.onError = function (/** @type {number} */ code, /** @type {string} */ message) {
-    post({ type: 'error', code: code, message: message });
-  };
-
-  if (annotation) {
-    // The annotator reports the count of pending marks after each change: a
-    // mark, a finished stroke, an undo, a removal and a clear.
-    odr.onAnnotationChange = function (/** @type {{count: number}} */ event) {
-      post({ type: 'marks', count: event.count });
-    };
-    // A selection marks itself with the armed tool, which is what a touch
-    // screen needs: there is no button to press with a selection standing.
-    annotation.setOptions({ markOnSelection: true });
-  }
-
   /*
     Escape leaves whatever mode the pen turned on, unless something in the
     frame - a sheet's cell editor, say - took the key for itself first.
@@ -106,7 +70,8 @@
   });
 
   /* The zoom is the renderer's where its viewport script is present, and a
-     bare `body{zoom}` where a view carries none. */
+     bare `body{zoom}` where a view carries none. Then this script reports the
+     zoom in the form `host-bridge.js` uses. */
   /** @param {number} value */
   function setZoom(value) {
     if (typeof odr.setZoom === 'function') {
@@ -115,7 +80,8 @@
     }
     document.body.style.zoom = String(value);
     root.style.setProperty('--odr-zoom', String(value));
-    post({ type: 'zoom', zoom: value, fitted: false });
+    var host = /** @type {any} */ (window).odrHost;
+    if (host) host.post(JSON.stringify({ type: 'zoomChange', detail: { zoom: value, followsFit: false } }));
   }
   function resetZoom() {
     if (typeof odr.resetZoom === 'function') {

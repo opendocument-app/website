@@ -2,8 +2,8 @@
 /*
   The bar above a mounted document: what is open, the zoom, the pen and the
   disc, and the way out. Under it, the strip of tools the pen opens - formatting
-  for a text document, the marking tools for a pdf - which is hidden until the
-  pen is pressed and empty for a sheet, where the cells are the tools.
+  for a text document and for the selected cells of a sheet, the marking tools
+  for a pdf - which is hidden until the pen is pressed.
 
   The demo puts all of it inside its own frame, which is hidden until something
   renders; `/tryit` uses the bar as the page's only bar, where the mark on the
@@ -32,6 +32,14 @@ const tool =
 /* Point sizes a document commonly uses; the select shows the selection's own
    size where it is one of these and nothing where it is not. */
 const sizes = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48];
+
+/* The alignments in the names `odr.editing.format({align})` takes. */
+const aligns = [
+  { align: 'left', label: 'Align left', icon: 'alignLeft' },
+  { align: 'center', label: 'Centre', icon: 'alignCenter' },
+  { align: 'right', label: 'Align right', icon: 'alignRight' },
+  { align: 'justify', label: 'Justify', icon: 'alignJustify' },
+] as const;
 
 /* The five kinds of mark a pdf takes, in the annotator's own names, each with
    the colour it starts with: a wash for the highlighter, red for the three
@@ -141,10 +149,23 @@ const marks = [
         <span data-viewer-highlight-bar class="mt-0.5 h-1 w-4 rounded-sm"></span>
       </span>
     </button>
-    <label title="Highlight colour" class={chevron}>
+    <label data-viewer-highlight-pick title="Highlight colour" class={chevron}>
       <span class="sr-only">Highlight colour</span>
       <Icon name="chevron" class="h-3 w-3" />
       <input data-viewer-highlight-color type="color" value="#fff59d" class="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+    </label>
+    <!-- The fill of a cell, as the same split button: only a sheet has one,
+         where a text document has the highlight. -->
+    <button data-viewer-fill type="button" title="Cell fill" aria-pressed="false" class={tool}>
+      <span aria-hidden="true" class="flex flex-col items-center">
+        <Icon name="fill" class="h-3.5 w-3.5" />
+        <span data-viewer-fill-bar class="mt-0.5 h-1 w-4 rounded-sm"></span>
+      </span>
+    </button>
+    <label data-viewer-fill-pick title="Cell fill colour" class={chevron}>
+      <span class="sr-only">Cell fill colour</span>
+      <Icon name="chevron" class="h-3 w-3" />
+      <input data-viewer-fill-color type="color" value="#c8e6c9" class="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
     </label>
     <select
       data-viewer-size
@@ -154,6 +175,17 @@ const marks = [
       <option value="">Size</option>
       {sizes.map((s) => <option value={`${s}pt`}>{s} pt</option>)}
     </select>
+    <!-- The alignment of the paragraphs or the cells the selection reaches.
+         A cell takes no justify, so the viewer hides that one for a sheet. -->
+    <span class="ml-1 flex items-center gap-0.5">
+      {
+        aligns.map((a) => (
+          <button data-viewer-align={a.align} type="button" title={a.label} aria-label={a.label} aria-pressed="false" class={tool}>
+            <Icon name={a.icon} class="h-3.5 w-3.5" />
+          </button>
+        ))
+      }
+    </span>
   </div>
 
   <!-- Every marking tool is the split button the document's highlight is:

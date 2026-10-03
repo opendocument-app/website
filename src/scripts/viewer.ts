@@ -157,15 +157,29 @@ function rgbOf(hex: string): number[] {
 }
 
 /*
+  The function that `hostMessageHandler` names. The renderer's `host-bridge.js`
+  calls it with every `odr.on*` callback of the page as one JSON
+  `{type, detail}` string, and it posts that string to this page unchanged.
+*/
+const HOST_HANDLER = 'odrHost.post';
+const HOST_SCRIPT =
+  "<script>window.odrHost={post:function(m){parent.postMessage({odrViewer:true,type:'page',message:m},'*')}};</script>";
+
+/*
+  The host function goes first in the head, because `host-bridge.js` looks
+  for it when it runs, and a callback can come before the body is complete.
   The bridge goes in just before `</body>`: after the renderer's own scripts,
   which are written at the end of the body, so everything it wires exists by
-  the time it runs. A view without a body - there is none today - gets it at
-  the end, where it still runs.
+  the time it runs. A view without a head or a body - there is none today -
+  gets each script at the start or the end, where it still runs.
 */
 function withBridge(html: string) {
+  const head = html.indexOf('<head>');
+  const at = head < 0 ? 0 : head + '<head>'.length;
+  html = html.slice(0, at) + HOST_SCRIPT + html.slice(at);
   const script = `<script>${bridgeSource}</script>`;
-  const at = html.lastIndexOf('</body>');
-  return at < 0 ? html + script : html.slice(0, at) + script + html.slice(at);
+  const end = html.lastIndexOf('</body>');
+  return end < 0 ? html + script : html.slice(0, end) + script + html.slice(end);
 }
 
 export interface ViewerOptions {
@@ -232,6 +246,12 @@ export function mountViewer({
   const colorBar = need('color-bar');
   const highlightColorInput = need<HTMLInputElement>('highlight-color');
   const highlightBar = need('highlight-bar');
+  const highlightPick = need('highlight-pick');
+  const fillBtn = need<HTMLButtonElement>('fill');
+  const fillPick = need('fill-pick');
+  const fillColorInput = need<HTMLInputElement>('fill-color');
+  const fillBar = need('fill-bar');
+  const alignBtns = all<HTMLButtonElement>('align');
   const sizeSelect = need<HTMLSelectElement>('size');
   const markGroup = need('mark');
   const toolBtns = all<HTMLButtonElement>('tool');
@@ -259,6 +279,9 @@ export function mountViewer({
   let canMark = false;
   /** A plain text file: it takes typing, but it has no styles to format. */
   let plainText = false;
+  /** A sheet: the format buttons act on the selected cells, which take a
+      fill in place of a highlight and no justify. */
+  let sheet = false;
   /** Whether the pen has been pressed: edit mode, or the marking tools shown. */
   let modeOn = false;
   /** The tool the frame reports as armed, which is what the buttons show. */
@@ -461,6 +484,11 @@ export function mountViewer({
 
     tools.hidden = !modeOn;
     formatGroup.hidden = !canFormat;
+    highlightBtn.hidden = sheet;
+    highlightPick.hidden = sheet;
+    fillBtn.hidden = !sheet;
+    fillPick.hidden = !sheet;
+    for (const b of alignBtns) b.hidden = sheet && b.dataset.viewerAlign === 'justify';
     markGroup.hidden = !canMark;
     undoBtn.disabled = canMark ? marks === 0 : !canUndo;
     redoBtn.hidden = canMark;
@@ -470,15 +498,18 @@ export function mountViewer({
     }
     toolsHint.textContent = canMark
       ? 'Select text, then a tool, to mark it once. A pressed tool marks every selection; Draw draws on the page.'
-      : canFormat
-        ? 'Type into the document. Select some text for the buttons, or Ctrl+B, I and U.'
-        : plainText
-          ? 'Type into the file. It is plain text, so it saves as UTF-8 with no styles.'
-          : 'Double-click a cell, or just start typing into it. Enter keeps the value, Escape drops it.';
+      : sheet
+        ? 'Double-click a cell, or just start typing into it. Shift-click or drag over cells to format them.'
+        : canFormat
+          ? 'Type into the document. Select some text for the buttons, or Ctrl+B, I and U.'
+          : plainText
+            ? 'Type into the file. It is plain text, so it saves as UTF-8 with no styles.'
+            : 'Double-click a cell, or just start typing into it. Enter keeps the value, Escape drops it.';
   }
 
   /* The buttons show what the selection has, as the page reports it: a key
-     per property the selected runs agree on, and none where they differ. */
+     per property the selected runs or cells agree on, and none where they
+     differ. */
   function paintSelection(style: Record<string, unknown>) {
     for (const b of styleBtns) {
       b.setAttribute('aria-pressed', String(style[b.dataset.viewerStyle ?? ''] === true));
@@ -490,8 +521,16 @@ export function mountViewer({
     if (typeof style.highlight === 'string' && /^#[0-9a-f]{6}$/i.test(style.highlight)) {
       highlightColorInput.value = style.highlight;
     }
+    fillBtn.setAttribute('aria-pressed', String(typeof style.fill === 'string'));
+    if (typeof style.fill === 'string' && /^#[0-9a-f]{6}$/i.test(style.fill)) {
+      fillColorInput.value = style.fill;
+    }
+    for (const b of alignBtns) {
+      b.setAttribute('aria-pressed', String(style.align === b.dataset.viewerAlign));
+    }
     paintColor();
     paintHighlight();
+    paintFill();
     const size = typeof style.size === 'string' ? style.size : '';
     sizeSelect.value = [...sizeSelect.options].some((o) => o.value === size) ? size : '';
   }
@@ -611,6 +650,7 @@ export function mountViewer({
     canFormat = false;
     canMark = false;
     plainText = false;
+    sheet = false;
     editDirty = false;
     canUndo = false;
     canRedo = false;
@@ -690,38 +730,15 @@ export function mountViewer({
         // The engine answered for the format and the document; the page
         // answers for the markup it was actually given.
         canEdit = canEdit && m.editable === true;
-        canFormat = canEdit && !m.sheet && !plainText;
+        sheet = m.sheet === true;
+        canFormat = canEdit && !plainText;
         canMark = canMark && m.annotatable === true;
         paintZoom(m.zoom);
         zoomBar.hidden = false;
         paintChrome();
         break;
-      case 'zoom':
-        paintZoom(m.zoom);
-        break;
-      case 'editMode':
-        modeOn = m.event?.editing === true;
-        if (m.event?.reason) showAlert(REFUSALS[m.event.reason] ?? m.event.message, 'warn');
-        paintChrome();
-        break;
-      case 'editChange':
-        editDirty = m.event?.dirty === true;
-        canUndo = m.event?.canUndo === true;
-        canRedo = m.event?.canRedo === true;
-        paintChrome();
-        break;
-      case 'editRefused':
-        showAlert(REFUSALS[m.event?.reason] ?? m.event?.message ?? 'That edit was not taken.', 'warn');
-        break;
-      case 'cellsStale':
-        showStale(Array.isArray(m.event?.cells) ? m.event.cells.length : 0);
-        break;
-      case 'selection':
-        paintSelection(m.style ?? {});
-        break;
-      case 'marks':
-        marks = Number(m.count) || 0;
-        paintChrome();
+      case 'page':
+        onPage(m.message);
         break;
       case 'tool':
         armedTool = typeof m.armed === 'string' ? m.armed : null;
@@ -729,9 +746,6 @@ export function mountViewer({
         break;
       case 'escape':
         if (modeOn) setMode(false);
-        break;
-      case 'error':
-        console.warn(`renderer error ${m.code}: ${m.message}`);
         break;
       case 'operations':
       case 'annotations': {
@@ -742,6 +756,56 @@ export function mountViewer({
       }
     }
   });
+
+  /*
+    A callback of the page, as `host-bridge.js` sends it: one JSON string of
+    `{type, detail}`. The page owns the wording; the viewer decides what a
+    visitor sees.
+  */
+  function onPage(message: unknown) {
+    if (typeof message !== 'string') return;
+    let type: unknown;
+    let detail: any;
+    try {
+      ({ type, detail } = JSON.parse(message));
+    } catch {
+      return;
+    }
+    switch (type) {
+      case 'zoomChange':
+        paintZoom(Number(detail?.zoom) || 1);
+        break;
+      case 'editModeChange':
+        modeOn = detail?.editing === true;
+        if (detail?.reason) showAlert(REFUSALS[detail.reason] ?? detail.message, 'warn');
+        paintChrome();
+        break;
+      case 'editChange':
+        editDirty = detail?.dirty === true;
+        canUndo = detail?.canUndo === true;
+        canRedo = detail?.canRedo === true;
+        paintChrome();
+        break;
+      case 'editRefused':
+        showAlert(REFUSALS[detail?.reason] ?? detail?.message ?? 'That edit was not taken.', 'warn');
+        break;
+      case 'cellsStale':
+        showStale(Array.isArray(detail?.cells) ? detail.cells.length : 0);
+        break;
+      case 'selectionChange':
+        paintSelection(detail ?? {});
+        break;
+      case 'annotationChange':
+        // The count of pending marks after each change: a mark, a finished
+        // stroke, an undo, a removal and a clear.
+        marks = Number(detail?.count) || 0;
+        paintChrome();
+        break;
+      case 'error':
+        console.warn(`renderer error ${detail?.code}: ${detail?.message}`);
+        break;
+    }
+  }
 
   /* The zoom is the renderer's: it fits the document to the frame, refits on
      a rotation, and reports every change. These only ask, and show. */
@@ -795,10 +859,18 @@ export function mountViewer({
 
     // No width: the renderer's viewport script measures the frame it lands in
     // and refits on a resize, which a width guessed here could not follow.
+    //
+    // `pdfAnnotationMarkOnSelection`: an armed tool marks each selection as
+    // it is made, which is what a touch screen needs, because there is no
+    // button to press while a selection stands. `pdfEnforcePermissions`: a
+    // pdf that refuses a copy refuses it here too.
     const options: Record<string, unknown> = {
       editable: editableFormat,
       spreadsheetCellLimit: SHEET_CELL_BUDGET,
       textDocumentMargin,
+      hostMessageHandler: HOST_HANDLER,
+      pdfAnnotationMarkOnSelection: true,
+      pdfEnforcePermissions: true,
     };
     if (asked !== undefined) options.fileType = asked;
 
@@ -822,11 +894,18 @@ export function mountViewer({
 
     /*
       `capabilities()` answers for the format, the document for itself: a pdf
-      whose cross-reference table had to be rebuilt takes no marks. Asking in a
-      net turns a question that throws into the same honest thing: no pen.
+      whose cross-reference table had to be rebuilt takes no marks, and
+      neither does a pdf whose permissions refuse a change to its
+      annotations. Asking in a net turns a question that throws into the same
+      honest thing: no pen.
     */
     canEdit = editableFormat && answers(() => currentDoc.isEditable() && currentDoc.isSavable());
-    canMark = markableFormat && answers(() => currentDoc.isAnnotatable());
+    canMark =
+      markableFormat &&
+      answers(
+        () =>
+          currentDoc.isAnnotatable() && currentDoc.permissions()?.modifyAnnotations !== false,
+      );
     paintChrome();
 
     // Instant on anything that is not a huge sheet, and on one that is (~2.2s
@@ -988,7 +1067,7 @@ export function mountViewer({
     events a tap synthesises.
   */
   const keepFocus = (e: Event) => e.preventDefault();
-  for (const b of [...styleBtns, highlightBtn, ...toolBtns, undoBtn, redoBtn]) {
+  for (const b of [...styleBtns, highlightBtn, fillBtn, ...alignBtns, ...toolBtns, undoBtn, redoBtn]) {
     b.addEventListener('mousedown', keepFocus);
   }
   for (const b of styleBtns) {
@@ -998,6 +1077,13 @@ export function mountViewer({
     const on = highlightBtn.getAttribute('aria-pressed') === 'true';
     send({ type: 'format', style: { highlight: on ? null : highlightColorInput.value } });
   });
+  fillBtn.addEventListener('click', () => {
+    const on = fillBtn.getAttribute('aria-pressed') === 'true';
+    send({ type: 'format', style: { fill: on ? null : fillColorInput.value } });
+  });
+  for (const b of alignBtns) {
+    b.addEventListener('click', () => send({ type: 'format', style: { align: b.dataset.viewerAlign } }));
+  }
   sizeSelect.addEventListener('change', () => {
     if (sizeSelect.value) send({ type: 'format', style: { size: sizeSelect.value } });
   });
@@ -1063,6 +1149,10 @@ export function mountViewer({
   // onto the word at the caret.
   const paintHighlight = colourControl(highlightColorInput, highlightBar, () =>
     send({ type: 'format', style: { highlight: highlightColorInput.value } }),
+  );
+  // A fill colour goes onto the selected cells.
+  const paintFill = colourControl(fillColorInput, fillBar, () =>
+    send({ type: 'format', style: { fill: fillColorInput.value } }),
   );
   // A tool's colour marks a selection once, or recolours the tool if it is
   // armed; the frame decides which.

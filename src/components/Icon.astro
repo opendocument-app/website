@@ -52,6 +52,12 @@ const icons = {
   strike: 'M16 4H9a3 3 0 0 0-2.83 4M14 12a4 4 0 0 1 0 8H6M4 12h16',
   squiggle: 'M7 3v6a5 5 0 0 0 10 0V3M3 20c1.5-1.5 3-1.5 4.5 0s3 1.5 4.5 0 3-1.5 4.5 0 3 1.5 4.5 0',
   scribble: 'M3 17c2-4 4.5-9 6.5-8.5S8 16 10.5 16.5 15 10 17 10.5 15 17 21 15',
+  /* The four alignments of a paragraph or a cell, and the fill of a cell. */
+  alignLeft: 'M21 6H3M15 12H3M17 18H3',
+  alignCenter: 'M21 6H3M17 12H7M19 18H5',
+  alignRight: 'M21 6H3M21 12H9M21 18H7',
+  alignJustify: 'M3 6h18M3 12h18M3 18h18',
+  fill: 'm19 11-8-8-8.6 8.6a2 2 0 0 0 0 2.8l5.2 5.2c.8.8 2 .8 2.8 0L19 11ZM5 2l5 5M2 13h15M22 20a2 2 0 1 1-4 0c0-1.6 1.7-2.4 2-4 .3 1.6 2 2.4 2 4Z',
 } as const;
 
 const isFilled = filled.has(name);

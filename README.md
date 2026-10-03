@@ -82,10 +82,14 @@ Several things about it are deliberate and easy to undo by accident:
   nothing of this page. The price is that this page cannot reach in either:
   `contentDocument` is null. So the one script of ours in the frame,
   `src/scripts/frame-bridge.js`, is appended to the markup before it mounts
-  and talks to `viewer.ts` over `postMessage` in both directions. It forwards
-  the renderer's `odr.on*` callbacks out, and takes commands in — zoom, the
-  editing mode, a format, a marking tool, and the two requests whose answers a
-  save is made of. It is inlined as a string (`?raw`), so it is plain
+  and talks to `viewer.ts` over `postMessage` in both directions. It takes
+  commands in — zoom, the editing mode, a format, a marking tool, and the two
+  requests whose answers a save is made of. The renderer's `odr.on*` callbacks
+  do not pass through it. Since 7.4.0 the viewer renders with
+  `hostMessageHandler: 'odrHost.post'`, and core's `host-bridge.js` sends every
+  callback to that function as one JSON `{type, detail}` string. The viewer
+  writes `odrHost` first in the head, so the function exists before core's
+  scripts run, and a callback that comes before the bridge runs is not lost. It is inlined as a string (`?raw`), so it is plain
   javascript and must never contain a closing script tag. This is also why
   `script-src` carries `'unsafe-inline'`; see the notes on `firebase.json`.
 - **The renderer fits and zooms the document itself.** No width is passed to
@@ -103,12 +107,14 @@ Several things about it are deliberate and easy to undo by accident:
   ordinary 40,000-cell XLSX is untouched and opens in well under a second.
   `sheetCut` says what was left out, and the demo says so above the frame. The
   apps have no such cap.
-- **Links in the frame are rewired by the bridge.** A `srcdoc` document
-  resolves urls against *this page*, so a PDF's `#p2` pointed at
+- **Fragment links in the frame are rewired by the bridge.** A `srcdoc`
+  document resolves urls against *this page*, so a PDF's `#p2` pointed at
   `https://opendocument.app/#p2` and a click replaced the document with the
-  homepage; an archive entry's relative link went to our 404. Fragments scroll
-  the frame from inside, relative links are drawn as text, and external links
-  keep `target="_blank"` and stay inert against the missing `allow-popups`.
+  homepage. Fragments scroll the frame from inside. Since 7.4.0 core removes
+  the `href` of a relative link and loads no image that a document names
+  outside itself, because the site leaves `allowExternalContent` off. An
+  external link keeps `target="_blank"` and stays inert against the missing
+  `allow-popups`.
 - **A format with no signature is asked for by name.** Everything else core
   detects from the bytes. Markdown is the exception — a `.md` is text and reads
   as text — so the demo maps the extension to the type for any format whose
@@ -199,16 +205,22 @@ it.
   something in the frame took the key first.
 - **The strip under the bar is the host's buttons.** For a text document:
   bold, italic, underline, strikethrough, a text colour, a highlight with a
-  colour of its own, and a size, each a `toggle` or a `format` sent to the
-  page, with `onSelectionChange` painting what the selection has. For a pdf:
+  colour of its own, a size, and the four alignments, each a `toggle` or a
+  `format` sent to the page, with `onSelectionChange` painting what the
+  selection has. Since 7.4.0 a sheet gets the same buttons for its selected
+  cells (a shift click, a shift arrow or a drag), with a cell fill in place
+  of the highlight and no justify, because a cell takes neither. For a pdf:
   the five tools, each with a colour of its own. With text selected, a tool
   marks it once; without a selection, a press arms the tool and a second press
   disarms it. Core owns that logic since 7.1.0: a button calls
   `odr.annotation.press`, and a new colour calls `odr.annotation.recolor`. A
   second press on a colour's arrow closes its picker. Undo and redo for both,
-  driven by `onEditChange`; a pdf has undo only. A sheet gets no buttons — the
-  cells are the editor — and a hint instead. A txt gets a hint too, because
-  plain text has no styles. The buttons
+  driven by `onEditChange`; a pdf has undo only. A txt gets a hint and no
+  format buttons, because plain text has no styles. An armed tool marks each
+  selection as it is made, through `pdfAnnotationMarkOnSelection` in the
+  config. The render sets `pdfEnforcePermissions`, so a pdf that refuses a
+  copy refuses it here too, and a pdf whose `permissions()` refuse a change
+  to its annotations gets no marker. The buttons
   cancel their `mousedown` so the frame keeps the focus and the selection.
 - **A refusal is a sentence of ours.** The page reports a reason and a message
   meant for a console; `REFUSALS` in the viewer holds the wording a visitor
