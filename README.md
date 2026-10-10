@@ -85,7 +85,7 @@ Several things about it are deliberate and easy to undo by accident:
   and talks to `viewer.ts` over `postMessage` in both directions. It takes
   commands in — zoom, the editing mode, a format, a marking tool, and the two
   requests whose answers a save is made of. The renderer's `odr.on*` callbacks
-  do not pass through it. Since 7.4.0 the viewer renders with
+  do not pass through it. The viewer renders with
   `hostMessageHandler: 'odrHost.post'`, and core's `host-bridge.js` sends every
   callback to that function as one JSON `{type, detail}` string. The viewer
   writes `odrHost` first in the head, so the function exists before core's
@@ -96,9 +96,7 @@ Several things about it are deliberate and easy to undo by accident:
   `open`: the css states `--odr-fit: auto`, the renderer's viewport script
   measures the frame it landed in, refits on a resize or a rotation, and
   reports every change through `odr.onZoomChange`. The zoom bar sends
-  `setZoom` and `resetZoom` and shows what comes back. Before 7.0.0 the page
-  computed the fit and wrote `body{zoom}` from outside, because the frame ran
-  no script.
+  `setZoom` and `resetZoom` and shows what comes back.
 - **A sheet is capped at 50,000 cells.** The markup goes into `srcdoc` as one
   string, so a sheet costs this page's memory rather than a stream the browser
   can page through, and a styled ODS runs ~226 bytes a cell — core's own
@@ -110,7 +108,7 @@ Several things about it are deliberate and easy to undo by accident:
 - **Fragment links in the frame are rewired by the bridge.** A `srcdoc`
   document resolves urls against *this page*, so a PDF's `#p2` pointed at
   `https://opendocument.app/#p2` and a click replaced the document with the
-  homepage. Fragments scroll the frame from inside. Since 7.4.0 core removes
+  homepage. Fragments scroll the frame from inside. Core removes
   the `href` of a relative link and loads no image that a document names
   outside itself, because the site leaves `allowExternalContent` off. An
   external link keeps `target="_blank"` and stays inert against the missing
@@ -132,6 +130,10 @@ and Keynote. One per format because what the engine can do depends on the
 format it is handed, and the idle panel's chips say so: a pen on the ones that
 edit and save, a marker on the PDF, a tooltip on each. The sources are not
 kept; regenerating one is a `soffice --headless --convert-to` away.
+
+Under the samples, four buttons open an empty ODT, ODS, DOCX or XLSX. The
+viewer makes it with `odr.create` and turns the edit mode on at once, and a
+save downloads it as `Untitled.<ext>`.
 
 ### Two mounts, one viewer
 
@@ -172,27 +174,27 @@ what is shown stays exactly as the renderer wrote it.
 
 ### Editing, marking, and what the pen does
 
-Core 7.0.0 made editing one mode every format shares
+Editing is one mode every format shares
 ([`docs/design/editing.md`](https://github.com/opendocument-app/OpenDocument.core/blob/main/docs/design/editing.md)
 in the core repository): the render writes an address on every run and
 paragraph, `odr.editing` on the page owns the mode, the operation log, undo
 and the refusals, and each format attaches its own editor — the caret editor
 for a text document (with bold, italic, underline, strikethrough, highlight,
-colour and size), the cell overlay for a sheet, a plain editor for a txt. A
+colour and size), the cell overlay for a sheet and a csv, a plain editor for a txt. A
 pdf has `odr.annotation` instead: five kinds of mark, drawn in the page, written into the file by
 `annotate()` as an incremental update. The bar has a pen and a disc for all of
 it.
 
 - **The pen only appears where a change can be saved.** `odr.fileTypes()`
-  reports `edit` and `save` for odt, odp, odg, docx, pptx, ods, xlsx and txt,
+  reports `edit` and `save` for odt, odp, odg, docx, pptx, ods, xlsx, csv and txt,
   and `annotate` for pdf. The type is looked up before `open`, so `editable:
   true` — which writes the addresses and the editor script — is only asked for
   where it leads somewhere. After opening, `isEditable()`/`isSavable()` and
   `isAnnotatable()` answer for the document itself, and the bridge's `ready`
   message answers for the markup that was actually rendered. Any of them
-  saying no is the same honest thing: no pen. Since 7.1.0 a txt answers the
-  same calls as a document: its log is one `setContent` with the whole text,
-  and `save()` writes UTF-8.
+  saying no is the same honest thing: no pen. A txt answers the same calls as
+  a document: its log is one `setContent` with the whole text, and `save()`
+  writes UTF-8.
 - **The mode starts off, and the pen turns it on in the frame.** The rendered
   markup is not editable on sight — 7.0.0's `editable` writes scaffolding, and
   `odr.editing.enable()` is what writes `contenteditable`. The pen sends
@@ -207,12 +209,18 @@ it.
   bold, italic, underline, strikethrough, a text colour, a highlight with a
   colour of its own, a size, and the four alignments, each a `toggle` or a
   `format` sent to the page, with `onSelectionChange` painting what the
-  selection has. Since 7.4.0 a sheet gets the same buttons for its selected
-  cells (a shift click, a shift arrow or a drag), with a cell fill in place
-  of the highlight and no justify, because a cell takes neither. For a pdf:
+  selection has. A sheet gets the same buttons for its selected cells (a
+  shift click, a shift arrow, a drag or a header), with a cell fill in place
+  of the highlight and no justify, because a cell takes neither. A second
+  press on a pressed alignment sends `align: null`, which sets the cells back
+  to the alignment of their value type. A sheet also gets six row and column
+  buttons, which call `odr.editing.insertRows`, `deleteRows`,
+  `insertColumns` and `deleteColumns`, one undo step each. A csv gets those
+  and no format buttons, because a csv states no style: the bridge reads
+  `data-odr-sheet-styles` on the body and reports it as `sheetStyles`. For a pdf:
   the five tools, each with a colour of its own. With text selected, a tool
   marks it once; without a selection, a press arms the tool and a second press
-  disarms it. Core owns that logic since 7.1.0: a button calls
+  disarms it. Core owns that logic: a button calls
   `odr.annotation.press`, and a new colour calls `odr.annotation.recolor`. A
   second press on a colour's arrow closes its picker. Undo and redo for both,
   driven by `onEditChange`; a pdf has undo only. A txt gets a hint and no
@@ -226,8 +234,13 @@ it.
   meant for a console; `REFUSALS` in the viewer holds the wording a visitor
   sees, keyed by reason, because a host owns the wording. A sheet's stale
   formula cells come through `onCellsStale` and get a persistent note of their
-  own: writing a cell takes the cached result of every formula reading it
-  away, and the saved file leaves them for a spreadsheet app to recompute.
+  own, because the page cannot compute a formula.
+- **A sheet is recalculated when it is saved.** The save calls
+  `recalculate()` before `save()`. When the result names any cell, the viewer
+  renders the document again, so the page shows the new results, and it turns
+  the edit mode back on. A cell that core cannot compute (`INDIRECT`,
+  `OFFSET`, an array formula, a cycle) gets a note that a spreadsheet app
+  computes it.
 - **A save is two questions and a download.** `getOperations` or
   `getAnnotations` goes into the frame, the envelope comes back as a json
   string, and it goes into `edit()` + `save()` or into `annotate()` as that

@@ -28,6 +28,9 @@
   var annotation = odr.annotation || null;
   var root = document.documentElement;
 
+  /* The row and column edits of a sheet, in the names `odr.editing` takes. */
+  var STRUCTURE = ['insertRows', 'deleteRows', 'insertColumns', 'deleteColumns'];
+
   /** @param {Record<string, unknown>} message */
   function post(message) {
     message.odrViewer = true;
@@ -152,6 +155,11 @@
       case 'toggle':
         if (editing) editing.toggle(m.property);
         break;
+      case 'structure':
+        // Only the four row and column calls. The page refuses a call that
+        // the open document does not have, so a text document says why.
+        if (editing && STRUCTURE.indexOf(m.call) >= 0) editing[m.call](m.where || undefined);
+        break;
       case 'getOperations':
         post({ type: 'operations', id: m.id, payload: editing ? editing.getOperations() : null });
         break;
@@ -175,11 +183,12 @@
     type: 'ready',
     editable: editing ? editing.isEditable() === true : false,
     sheet: !!odr.sheet,
+    // A csv states no style, so its cells take no format.
+    sheetStyles: document.body.getAttribute('data-odr-sheet-styles') !== 'false',
     annotatable: !!annotation,
     // The canvas the renderer painted on the body, for the frame to wear on
     // the overscroll; see the viewer.
     background: getComputedStyle(document.body).backgroundColor,
     zoom: typeof odr.getZoom === 'function' ? odr.getZoom() : 1,
-    fitted: typeof odr.isZoomFitted === 'function' ? odr.isZoomFitted() : true,
   });
 })();

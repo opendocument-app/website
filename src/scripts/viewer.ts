@@ -82,6 +82,7 @@ const REFUSALS: Record<string, string> = {
   range: 'An edit cannot reach over a picture or a table.',
   unnameableEdit: 'That edit landed where the engine cannot name it, so it was not taken.',
   outOfScope: 'That edit reaches past what this page offers.',
+  sheetCut: 'That part of the sheet is past what this preview builds, so it cannot be edited here.',
 };
 
 /*
@@ -136,6 +137,13 @@ function detectedType(odr: any, bytes: Uint8Array): number | undefined {
   } catch {
     return undefined;
   }
+}
+
+/* The type a blank document named `Untitled.<ext>` is made as, where the
+   engine can make one. */
+function blankType(odr: any, name: string): number | undefined {
+  const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase();
+  return odr.fileTypes().find((t: any) => t.capabilities?.create && t.extensions?.includes(ext))?.fileType;
 }
 
 function askedType(odr: any, name: string): number | undefined {
@@ -222,6 +230,7 @@ export function mountViewer({
   const fileInput = need<HTMLInputElement>('file');
   const pickBtn = need<HTMLButtonElement>('pick');
   const sampleBtns = all<HTMLButtonElement>('sample');
+  const blankBtns = all<HTMLButtonElement>('blank');
   const result = need('result');
   const frameHost = need('frame-host');
   const filename = need('filename');
@@ -252,6 +261,8 @@ export function mountViewer({
   const fillColorInput = need<HTMLInputElement>('fill-color');
   const fillBar = need('fill-bar');
   const alignBtns = all<HTMLButtonElement>('align');
+  const structureGroup = need('structure');
+  const structureBtns = all<HTMLButtonElement>('structure-call');
   const sizeSelect = need<HTMLSelectElement>('size');
   const markGroup = need('mark');
   const toolBtns = all<HTMLButtonElement>('tool');
@@ -282,6 +293,9 @@ export function mountViewer({
   /** A sheet: the format buttons act on the selected cells, which take a
       fill in place of a highlight and no justify. */
   let sheet = false;
+  /** Turn the edit mode on when the next frame reports in: for a blank
+      document, and for a sheet rendered again after a save. */
+  let editOnReady = false;
   /** Whether the pen has been pressed: edit mode, or the marking tools shown. */
   let modeOn = false;
   /** The tool the frame reports as armed, which is what the buttons show. */
@@ -436,17 +450,29 @@ export function mountViewer({
   }
 
   /*
-    Writing a cell takes the cached result of every formula that reads it away
-    - the engine has no evaluator yet, and a number it knows to be wrong is
-    worse than none. The page marks those cells; this says what the mark means
-    and that the formulas are still there for the app that opens the file.
+    The page marks every formula cell whose input an edit changed, because
+    the page cannot compute a formula. The engine can: a save calls
+    `recalculate()`, and the sheet is rendered again with the new results.
+    This says what the mark means until then.
   */
   function showStale(count: number) {
     if (!count) {
       staleNote.hidden = true;
       return;
     }
-    staleNote.textContent = `${count} formula ${count === 1 ? 'cell shows a result' : 'cells show results'} your edit made out of date. The saved file keeps the formulas, and a spreadsheet app recomputes them when it opens the file.`;
+    staleNote.textContent = `${count} formula ${count === 1 ? 'cell shows a result' : 'cells show results'} your edit made out of date. A save computes them again.`;
+    staleNote.hidden = false;
+  }
+
+  /*
+    What `recalculate()` could not do. A formula that reads through
+    `INDIRECT` or `OFFSET`, or an array formula, has no result in a saved ods
+    and keeps its old one in an xlsx. A cell in a cycle has no result.
+  */
+  function showUncomputed(recalc: any) {
+    const count = (recalc?.unevaluated?.length ?? 0) + (recalc?.circular?.length ?? 0);
+    if (!count) return;
+    staleNote.textContent = `${count} formula ${count === 1 ? 'cell' : 'cells'} could not be computed here. A spreadsheet app computes ${count === 1 ? 'it' : 'them'} when it opens the saved file.`;
     staleNote.hidden = false;
   }
 
@@ -489,6 +515,7 @@ export function mountViewer({
     fillBtn.hidden = !sheet;
     fillPick.hidden = !sheet;
     for (const b of alignBtns) b.hidden = sheet && b.dataset.viewerAlign === 'justify';
+    structureGroup.hidden = !(canEdit && sheet);
     markGroup.hidden = !canMark;
     undoBtn.disabled = canMark ? marks === 0 : !canUndo;
     redoBtn.hidden = canMark;
@@ -499,12 +526,12 @@ export function mountViewer({
     toolsHint.textContent = canMark
       ? 'Select text, then a tool, to mark it once. A pressed tool marks every selection; Draw draws on the page.'
       : sheet
-        ? 'Double-click a cell, or just start typing into it. Shift-click or drag over cells to format them.'
+        ? canFormat
+          ? 'Type into a cell; Alt+Enter breaks a line. Drag over cells, or click a header, to format them or to add and remove rows and columns.'
+          : 'Type into a cell; Enter keeps the value, Escape drops it. Click a header to add and remove rows and columns. A csv has no styles.'
         : canFormat
           ? 'Type into the document. Select some text for the buttons, or Ctrl+B, I and U.'
-          : plainText
-            ? 'Type into the file. It is plain text, so it saves as UTF-8 with no styles.'
-            : 'Double-click a cell, or just start typing into it. Enter keeps the value, Escape drops it.';
+          : 'Type into the file. It is plain text, so it saves as UTF-8 with no styles.';
   }
 
   /* The buttons show what the selection has, as the page reports it: a key
@@ -594,7 +621,12 @@ export function mountViewer({
 
     Both envelopes are json strings and stay strings: the binding underneath is
     a `std::string`, and an object throws `BindingError` there. A plain text
-    file takes the same calls since core 7.1.0, with a log of one `setContent`.
+    file takes the same calls, with a log of one `setContent`.
+
+    A sheet is recalculated before it is saved. `save()` would do that too,
+    but only `recalculate()` names the formula cells it touched. When it
+    names any, the sheet is rendered again, so the page shows what the file
+    now holds.
   */
   async function saveDocument() {
     if (!currentDoc) return;
@@ -614,9 +646,12 @@ export function mountViewer({
         const payload = await ask('getOperations');
         if (!payload) throw new Error('The edits could not be read back.');
         if (JSON.parse(payload).ops.length) currentDoc.edit(payload);
+        const recalc = sheet ? currentDoc.recalculate() : null;
         saveBytes(currentDoc.save(), currentName);
         // The page and the file agree now: its log resets, undo starts over.
         send({ type: 'committed' });
+        if (recalc && Object.values(recalc).some((cells: any) => cells.length)) renderAgain();
+        showUncomputed(recalc);
       }
       discardArmed = false;
     } catch (e: any) {
@@ -651,6 +686,7 @@ export function mountViewer({
     canMark = false;
     plainText = false;
     sheet = false;
+    editOnReady = false;
     editDirty = false;
     canUndo = false;
     canRedo = false;
@@ -706,6 +742,30 @@ export function mountViewer({
   }
 
   /*
+    A new frame for the open document, after a save changed what the file
+    holds. The page's state goes with the old frame, so the edit mode is
+    turned on again when the new one reports in. The zoom fits again, and a
+    sheet shows its first tab.
+  */
+  function renderAgain() {
+    let html: string;
+    try {
+      html = currentDoc.render(0).html;
+    } catch {
+      // The file is saved already. The old frame stays, with its marks.
+      return;
+    }
+    editOnReady = modeOn;
+    modeOn = false;
+    editDirty = false;
+    canUndo = false;
+    canRedo = false;
+    showStale(0);
+    paintChrome();
+    mountFrame(html);
+  }
+
+  /*
     The frame's side of the conversation. Only the current frame is listened
     to: a message from a frame that was torn down, or from anything else on
     the page, is not ours.
@@ -731,11 +791,13 @@ export function mountViewer({
         // answers for the markup it was actually given.
         canEdit = canEdit && m.editable === true;
         sheet = m.sheet === true;
-        canFormat = canEdit && !plainText;
+        canFormat = canEdit && !plainText && !(sheet && m.sheetStyles === false);
         canMark = canMark && m.annotatable === true;
         paintZoom(m.zoom);
         zoomBar.hidden = false;
         paintChrome();
+        if (editOnReady && canEdit) setMode(true);
+        editOnReady = false;
         break;
       case 'page':
         onPage(m.message);
@@ -821,7 +883,8 @@ export function mountViewer({
     send({ type: 'setZoom', value });
   }
 
-  async function open(bytes: Uint8Array, name: string) {
+  /* `bytes` null opens a blank document of the type that `name` says. */
+  async function open(bytes: Uint8Array | null, name: string) {
     teardown();
     setBusy('Loading the renderer…');
 
@@ -841,7 +904,8 @@ export function mountViewer({
     setBusy(`Opening ${name}…`);
     await nextFrame();
 
-    const asked = askedType(odr, name);
+    const asked = bytes ? askedType(odr, name) : undefined;
+    const blank = bytes ? undefined : blankType(odr, name);
     /*
       Editable output carries an address on every run and the editor's script,
       which is markup nobody can use where the format cannot be written back
@@ -850,7 +914,7 @@ export function mountViewer({
       what turns it on, and only in the frame, so a phone does not raise its
       keyboard over a document being read.
     */
-    const info = typeInfo(odr, asked ?? detectedType(odr, bytes));
+    const info = typeInfo(odr, bytes ? (asked ?? detectedType(odr, bytes)) : blank);
     const editableFormat = Boolean(info?.capabilities?.edit && info?.capabilities?.save);
     const markableFormat = Boolean(info?.capabilities?.annotate);
     currentMime = info?.mimeTypes?.[0] ?? 'application/octet-stream';
@@ -875,7 +939,15 @@ export function mountViewer({
     if (asked !== undefined) options.fileType = asked;
 
     try {
-      currentDoc = odr.open(bytes, options);
+      if (bytes) {
+        currentDoc = odr.open(bytes, options);
+      } else if (blank !== undefined) {
+        currentDoc = odr.create(blank, options);
+        // A blank page is there to be typed into.
+        editOnReady = true;
+      } else {
+        throw new Error('This engine cannot make that type of document.');
+      }
     } catch (e) {
       const [msg, detail] = friendlyError(e, name);
       setIdle(msg, detail, true);
@@ -951,7 +1023,7 @@ export function mountViewer({
     is one net, and it says the true thing: this document did not open, here
     is why, and the panel is back.
   */
-  async function openSafely(bytes: Uint8Array, name: string) {
+  async function openSafely(bytes: Uint8Array | null, name: string) {
     try {
       await open(bytes, name);
     } catch (e: any) {
@@ -1002,6 +1074,15 @@ export function mountViewer({
       }
 
       await openSafely(bytes, name);
+    });
+  }
+
+  /* A blank document of a type the engine can make, named for the
+     download a save gives. Nothing to fetch, so it opens straight away. */
+  for (const btn of blankBtns) {
+    btn.addEventListener('click', () => {
+      if (wouldDiscard()) return;
+      void openSafely(null, `Untitled.${btn.dataset.viewerBlank}`);
     });
   }
 
@@ -1067,7 +1148,16 @@ export function mountViewer({
     events a tap synthesises.
   */
   const keepFocus = (e: Event) => e.preventDefault();
-  for (const b of [...styleBtns, highlightBtn, fillBtn, ...alignBtns, ...toolBtns, undoBtn, redoBtn]) {
+  for (const b of [
+    ...styleBtns,
+    highlightBtn,
+    fillBtn,
+    ...alignBtns,
+    ...structureBtns,
+    ...toolBtns,
+    undoBtn,
+    redoBtn,
+  ]) {
     b.addEventListener('mousedown', keepFocus);
   }
   for (const b of styleBtns) {
@@ -1081,8 +1171,22 @@ export function mountViewer({
     const on = fillBtn.getAttribute('aria-pressed') === 'true';
     send({ type: 'format', style: { fill: on ? null : fillColorInput.value } });
   });
+  // On a sheet, a second press sets the cells back to the alignment of their
+  // value: text to the start, a number or a date to the right.
   for (const b of alignBtns) {
-    b.addEventListener('click', () => send({ type: 'format', style: { align: b.dataset.viewerAlign } }));
+    b.addEventListener('click', () => {
+      const off = sheet && b.getAttribute('aria-pressed') === 'true';
+      send({ type: 'format', style: { align: off ? null : b.dataset.viewerAlign } });
+    });
+  }
+  for (const b of structureBtns) {
+    b.addEventListener('click', () =>
+      send({
+        type: 'structure',
+        call: b.dataset.viewerStructureCall,
+        where: b.dataset.viewerStructureWhere,
+      }),
+    );
   }
   sizeSelect.addEventListener('change', () => {
     if (sizeSelect.value) send({ type: 'format', style: { size: sizeSelect.value } });

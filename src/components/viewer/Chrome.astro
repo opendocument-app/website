@@ -2,8 +2,9 @@
 /*
   The bar above a mounted document: what is open, the zoom, the pen and the
   disc, and the way out. Under it, the strip of tools the pen opens - formatting
-  for a text document and for the selected cells of a sheet, the marking tools
-  for a pdf - which is hidden until the pen is pressed.
+  for a text document and for the selected cells of a sheet, the row and column
+  edits of a sheet, the marking tools for a pdf - which is hidden until the pen
+  is pressed.
 
   The demo puts all of it inside its own frame, which is hidden until something
   renders; `/tryit` uses the bar as the page's only bar, where the mark on the
@@ -39,6 +40,17 @@ const aligns = [
   { align: 'center', label: 'Centre', icon: 'alignCenter' },
   { align: 'right', label: 'Align right', icon: 'alignRight' },
   { align: 'justify', label: 'Justify', icon: 'alignJustify' },
+] as const;
+
+/* The row and column edits of a sheet, in the names `odr.editing` takes:
+   the call, and where it puts the new rows or columns. */
+const structure = [
+  { call: 'insertRows', where: 'above', label: 'Insert rows above', icon: 'rowAbove' },
+  { call: 'insertRows', where: 'below', label: 'Insert rows below', icon: 'rowBelow' },
+  { call: 'deleteRows', where: '', label: 'Delete rows', icon: 'rowDelete' },
+  { call: 'insertColumns', where: 'left', label: 'Insert columns to the left', icon: 'columnLeft' },
+  { call: 'insertColumns', where: 'right', label: 'Insert columns to the right', icon: 'columnRight' },
+  { call: 'deleteColumns', where: '', label: 'Delete columns', icon: 'columnDelete' },
 ] as const;
 
 /* The five kinds of mark a pdf takes, in the annotator's own names, each with
@@ -176,7 +188,8 @@ const marks = [
       {sizes.map((s) => <option value={`${s}pt`}>{s} pt</option>)}
     </select>
     <!-- The alignment of the paragraphs or the cells the selection reaches.
-         A cell takes no justify, so the viewer hides that one for a sheet. -->
+         A cell takes no justify, so the viewer hides that one for a sheet,
+         and a second press sets a cell back to the alignment of its value. -->
     <span class="ml-1 flex items-center gap-0.5">
       {
         aligns.map((a) => (
@@ -186,6 +199,26 @@ const marks = [
         ))
       }
     </span>
+  </div>
+
+  <!-- A sheet only: rows and columns, as many as the selection spans. Each
+       button is one undo step, and a header click selects a whole row or
+       column for them. -->
+  <div data-viewer-structure hidden class="flex items-center gap-0.5">
+    {
+      structure.map((s) => (
+        <button
+          data-viewer-structure-call={s.call}
+          data-viewer-structure-where={s.where}
+          type="button"
+          title={s.label}
+          aria-label={s.label}
+          class={tool}
+        >
+          <Icon name={s.icon} class="h-4 w-4" />
+        </button>
+      ))
+    }
   </div>
 
   <!-- Every marking tool is the split button the document's highlight is:

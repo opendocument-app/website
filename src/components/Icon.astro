@@ -58,6 +58,14 @@ const icons = {
   alignRight: 'M21 6H3M21 12H9M21 18H7',
   alignJustify: 'M3 6h18M3 12h18M3 18h18',
   fill: 'm19 11-8-8-8.6 8.6a2 2 0 0 0 0 2.8l5.2 5.2c.8.8 2 .8 2.8 0L19 11ZM5 2l5 5M2 13h15M22 20a2 2 0 1 1-4 0c0-1.6 1.7-2.4 2-4 .3 1.6 2 2.4 2 4Z',
+  // A row or a column as a box, with a plus on the side the new one goes, or
+  // a cross through the one that goes.
+  rowAbove: 'M3 14h18v6H3zM12 3v7M8.5 6.5h7',
+  rowBelow: 'M3 4h18v6H3zM12 14v7M8.5 17.5h7',
+  rowDelete: 'M3 8h18v8H3zM10 10l4 4M14 10l-4 4',
+  columnLeft: 'M14 3h6v18h-6zM3 12h7M6.5 8.5v7',
+  columnRight: 'M4 3h6v18H4zM14 12h7M17.5 8.5v7',
+  columnDelete: 'M8 3h8v18H8zM10 10l4 4M14 10l-4 4',
 } as const;
 
 const isFilled = filled.has(name);

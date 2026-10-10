@@ -38,13 +38,22 @@ const samples: { ext: string; tone: 'text' | 'sheet' | 'slide' | 'plain'; does: 
   { ext: 'doc', tone: 'text', does: 'read' },
   { ext: 'xls', tone: 'sheet', does: 'read' },
   { ext: 'ppt', tone: 'slide', does: 'read' },
-  { ext: 'csv', tone: 'sheet', does: 'read' },
+  { ext: 'csv', tone: 'sheet', does: 'edit' },
   { ext: 'txt', tone: 'plain', does: 'edit' },
   { ext: 'rtf', tone: 'text', does: 'read' },
   { ext: 'pages', tone: 'text', does: 'read' },
   { ext: 'numbers', tone: 'sheet', does: 'read' },
   { ext: 'key', tone: 'slide', does: 'read' },
   { ext: 'md', tone: 'plain', does: 'read' },
+];
+
+/* The types `odr.create` makes, in the order of the samples. The viewer
+   checks each one against the engine's `create` capability on a click. */
+const blanks: { ext: string; tone: 'text' | 'sheet' }[] = [
+  { ext: 'odt', tone: 'text' },
+  { ext: 'ods', tone: 'sheet' },
+  { ext: 'docx', tone: 'text' },
+  { ext: 'xlsx', tone: 'sheet' },
 ];
 
 const titles: Record<Does, string> = {
@@ -151,6 +160,26 @@ const tones = {
             ))
           }
         </ul>
+      </div>
+
+      <!-- Or nothing at all: an empty document, open for typing. -->
+      <div class="flex flex-wrap items-center justify-center gap-2">
+        <p class="text-xs text-on-surface-variant">Or start an empty one:</p>
+        {
+          blanks.map((b) => (
+            <button
+              data-viewer-blank={b.ext}
+              type="button"
+              title={`A new, empty ${b.ext.toUpperCase()} file`}
+              class:list={[
+                'rounded-full border border-outline-variant px-2.5 py-1 text-[11px] font-bold uppercase leading-none tracking-wide transition-colors hover:bg-surface-container',
+                tones[b.tone],
+              ]}
+            >
+              {b.ext}
+            </button>
+          ))
+        }
       </div>
     </div>
 
