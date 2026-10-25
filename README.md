@@ -70,8 +70,8 @@ Several things about it are deliberate and easy to undo by accident:
   for the version. **One version is ever on the site**: `/odr/index.js` is a
   generated forwarder to it, for html cached from before a release, and there
   is no second copy of anything to be half loaded from.
-- **It loads on interaction, never on page load.** The wasm is 4.4 MB (about
-  1.7 MB gzipped), many times the rest of the page put together. The first
+- **It loads on interaction, never on page load.** The wasm is 6.0 MB (about
+  2.2 MB gzipped), many times the rest of the page put together. The first
   drop, file pick or sample click is what fetches it.
 - **The frame runs the renderer's scripts, and has no origin.** The iframe is
   sandboxed with `allow-scripts` and *without* `allow-same-origin`, which is
@@ -83,7 +83,7 @@ Several things about it are deliberate and easy to undo by accident:
   `contentDocument` is null. So the one script of ours in the frame,
   `src/scripts/frame-bridge.js`, is appended to the markup before it mounts
   and talks to `viewer.ts` over `postMessage` in both directions. It takes
-  commands in — zoom, the editing mode, a format, a marking tool, and the two
+  commands in — zoom, the editing mode, a format, a marking tool, a search, and the two
   requests whose answers a save is made of. The renderer's `odr.on*` callbacks
   do not pass through it. The viewer renders with
   `hostMessageHandler: 'odrHost.post'`, and core's `host-bridge.js` sends every
@@ -232,15 +232,26 @@ it.
   cancel their `mousedown` so the frame keeps the focus and the selection.
 - **A refusal is a sentence of ours.** The page reports a reason and a message
   meant for a console; `REFUSALS` in the viewer holds the wording a visitor
-  sees, keyed by reason, because a host owns the wording. A sheet's stale
-  formula cells come through `onCellsStale` and get a persistent note of their
-  own, because the page cannot compute a formula.
+  sees, keyed by reason, because a host owns the wording.
+- **A sheet computes in the page.** An editable ods or xlsx page carries
+  core's formula module (about 540 KB more markup), so a commit, an undo, a
+  redo and a row or column edit show the new results at once. A cell takes a
+  typed formula such as `=SUM(B2:B4)`. The bridge calls
+  `odr.editing.loadFormulas()` when the pen turns the mode on, so the first
+  edit does not wait for the module. Only a cell that the evaluator has no
+  answer for reaches `onCellsStale`, and it gets a persistent note.
 - **A sheet is recalculated when it is saved.** The save calls
-  `recalculate()` before `save()`. When the result names any cell, the viewer
-  renders the document again, so the page shows the new results, and it turns
-  the edit mode back on. A cell that core cannot compute (`INDIRECT`,
-  `OFFSET`, an array formula, a cycle) gets a note that a spreadsheet app
-  computes it.
+  `recalculate()` before `save()`. Only if the page left stale cells, and the
+  result names any cell, does the viewer render the document again and turn
+  the edit mode back on. Otherwise the frame stays as it is, because the page
+  already shows the results. A cell that core cannot compute gets a note that
+  a spreadsheet app computes it.
+- **The search is the page's.** Core lays out only the parts of a document
+  near the viewport (`lazyLayout`, on by default), so the find of the browser
+  misses the rest. The search button and Ctrl+F in the frame open a strip
+  that sends the text to `odr.search`, `searchNext` and `searchPrevious`
+  through the bridge. The page marks the hits, and `onSearchChange` sends the
+  count back as `searchChange`.
 - **A save is two questions and a download.** `getOperations` or
   `getAnnotations` goes into the frame, the envelope comes back as a json
   string, and it goes into `edit()` + `save()` or into `annotate()` as that

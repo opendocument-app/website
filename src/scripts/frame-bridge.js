@@ -72,6 +72,30 @@
     if (event.key === 'Escape' && !event.defaultPrevented) post({ type: 'escape' });
   });
 
+  /*
+    Ctrl+F and Cmd+F open the search strip of the viewer, not the find of the
+    browser. The page lays out only the parts near the viewport, so the find
+    of the browser does not reach the rest, but `odr.search` does.
+  */
+  document.addEventListener('keydown', function (event) {
+    if (typeof odr.search !== 'function') return;
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'f') {
+      event.preventDefault();
+      post({ type: 'find' });
+    }
+  });
+
+  /* A step goes to the next or the previous hit of the same text, and searches
+     first if the text changed. The count comes back as `searchChange`. */
+  /** @param {string} text @param {number} step */
+  function search(text, step) {
+    if (typeof odr.search !== 'function') return;
+    if (!text) odr.resetSearch();
+    else if (step > 0) odr.searchNext(text);
+    else if (step < 0) odr.searchPrevious(text);
+    else odr.search(text);
+  }
+
   /* The zoom is the renderer's where its viewport script is present, and a
      bare `body{zoom}` where a view carries none. Then this script reports the
      zoom in the form `host-bridge.js` uses. */
@@ -138,6 +162,12 @@
         break;
       case 'edit':
         if (editing) m.on ? editing.enable() : editing.disable();
+        // A sheet computes its formula cells in the page. The module loads
+        // now, so that the first edit does not wait for it.
+        if (editing && m.on && typeof editing.loadFormulas === 'function') editing.loadFormulas();
+        break;
+      case 'search':
+        search(String(m.text || ''), Number(m.step) || 0);
         break;
       case 'undo':
         if (annotation) {
@@ -186,6 +216,7 @@
     // A csv states no style, so its cells take no format.
     sheetStyles: document.body.getAttribute('data-odr-sheet-styles') !== 'false',
     annotatable: !!annotation,
+    searchable: typeof odr.search === 'function',
     // The canvas the renderer painted on the body, for the frame to wear on
     // the overscroll; see the viewer.
     background: getComputedStyle(document.body).backgroundColor,

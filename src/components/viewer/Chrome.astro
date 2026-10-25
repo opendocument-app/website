@@ -72,6 +72,21 @@ const marks = [
     <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-brand-sheet"></span>
     <p data-viewer-filename class="min-w-0 flex-1 truncate text-sm font-medium"></p>
 
+    <!-- Opens the search strip. The page lays out only what is near the
+         viewport, so the find of the browser misses the rest; `odr.search`
+         does not. See the viewer script. -->
+    <button
+      data-viewer-find-open
+      hidden
+      type="button"
+      title="Search this document (Ctrl+F)"
+      aria-label="Search this document"
+      aria-expanded="false"
+      class={round}
+    >
+      <Icon name="search" class="h-4 w-4" />
+    </button>
+
     <!-- The renderer's own viewport script zooms the document and reports the
          factor back; these buttons only ask. A phone cannot pinch an iframe,
          which is why they exist at all. -->
@@ -122,6 +137,35 @@ const marks = [
       <Icon name="close" class="h-4 w-4" />
     </button>
   </div>
+</div>
+
+<!-- What the search button opens. Enter goes to the next hit, Shift+Enter to
+     the one before, Escape closes the strip. The count comes from the page. -->
+<div
+  data-viewer-find
+  hidden
+  class="flex shrink-0 items-center gap-2 border-b border-outline-variant bg-surface-container px-4 py-1.5"
+>
+  <Icon name="search" class="h-4 w-4 shrink-0 text-on-surface-variant" />
+  <input
+    data-viewer-find-text
+    type="search"
+    aria-label="Search for"
+    placeholder="Search"
+    autocomplete="off"
+    spellcheck="false"
+    class="h-7 min-w-0 flex-1 rounded-full border border-outline bg-surface px-3 text-sm outline-none focus:border-primary"
+  />
+  <p data-viewer-find-count aria-live="polite" class="shrink-0 text-xs tabular-nums text-on-surface-variant"></p>
+  <button data-viewer-find-previous type="button" disabled title="Previous hit (Shift+Enter)" aria-label="Previous hit" class={round}>
+    <Icon name="chevron" class="h-4 w-4 rotate-180" />
+  </button>
+  <button data-viewer-find-next type="button" disabled title="Next hit (Enter)" aria-label="Next hit" class={round}>
+    <Icon name="chevron" class="h-4 w-4" />
+  </button>
+  <button data-viewer-find-close type="button" title="Close the search (Escape)" aria-label="Close the search" class={round}>
+    <Icon name="close" class="h-4 w-4" />
+  </button>
 </div>
 
 <!-- What the pen opens. Every group is hidden until the document says it
@@ -265,7 +309,8 @@ const marks = [
 >
 </p>
 
-<!-- The formula cells an edit left out of date; stays up while there are any. -->
+<!-- The formula cells the page could not compute after an edit; stays up
+     while there are any. -->
 <p
   data-viewer-stale
   hidden

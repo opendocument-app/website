@@ -19,7 +19,7 @@
 import bridgeSource from './frame-bridge.js?raw';
 
 /*
-  The renderer is ~1.4 MB gzipped, so it is never part of the page load: the
+  The renderer is ~2.2 MB gzipped, so it is never part of the page load: the
   first drop, pick or sample click pulls it in. It is served from `/odr/`
   rather than bundled - the emscripten glue resolves its `.wasm` sibling from
   `import.meta.url`, which survives being copied into `public/` untouched but
@@ -73,8 +73,10 @@ const INK_WIDTH = 2;
 */
 const REFUSALS: Record<string, string> = {
   newLine: 'A line break inside a paragraph is more than an edit can hand back.',
-  formula: 'That cell holds a formula, which stays as it is — type into a plain cell instead.',
-  formulaInput: 'Typing a formula is not supported yet; a number or some text is.',
+  formula: 'That cell holds a formula that is shared with other cells, so it stays as it is.',
+  formulaInput: 'This page cannot take a formula; a number or some text it can.',
+  formulaInvalid: 'That formula does not parse, so the cell keeps what it had.',
+  array: 'That cell is part of an array formula, so it stays as it is, and rows and columns cannot be added or removed through it.',
   rich: 'That cell holds more than plain text, so it stays as it is.',
   shapes: 'That cell holds a drawing, so it stays as it is.',
   readOnly: 'This document cannot be edited.',
@@ -270,6 +272,13 @@ export function mountViewer({
   const toolBars = [...all('tool-bar')];
   const undoBtn = need<HTMLButtonElement>('undo');
   const redoBtn = need<HTMLButtonElement>('redo');
+  const findOpenBtn = need<HTMLButtonElement>('find-open');
+  const findStrip = need('find');
+  const findText = need<HTMLInputElement>('find-text');
+  const findCount = need('find-count');
+  const findPreviousBtn = need<HTMLButtonElement>('find-previous');
+  const findNextBtn = need<HTMLButtonElement>('find-next');
+  const findCloseBtn = need<HTMLButtonElement>('find-close');
   /* Everything about the open document. Inside the hidden box on the demo, and
      the right-hand half of the page's only bar on `/tryit`, which has to empty
      itself when the document goes. */
@@ -312,6 +321,8 @@ export function mountViewer({
   let discardArmed = false;
   /** The zoom the frame reports, 1 being actual size. */
   let currentZoom = 1;
+  /** Whether the page has `odr.search`, as the frame reports it. */
+  let canFind = false;
 
   /** Answers the frame owes: a request id to what resolves it. */
   const asks = new Map<number, (payload: string | null) => void>();
@@ -450,24 +461,26 @@ export function mountViewer({
   }
 
   /*
-    The page marks every formula cell whose input an edit changed, because
-    the page cannot compute a formula. The engine can: a save calls
-    `recalculate()`, and the sheet is rendered again with the new results.
-    This says what the mark means until then.
+    The page computes the formula cells of a sheet as the visitor edits. It
+    marks a formula cell as stale only if the evaluator has no answer for
+    it. The engine tries again: a save calls `recalculate()`, and the sheet
+    is rendered again with the new results. This says what the mark means
+    until then.
   */
+  let staleCount = 0;
   function showStale(count: number) {
+    staleCount = count;
     if (!count) {
       staleNote.hidden = true;
       return;
     }
-    staleNote.textContent = `${count} formula ${count === 1 ? 'cell shows a result' : 'cells show results'} your edit made out of date. A save computes them again.`;
+    staleNote.textContent = `${count} formula ${count === 1 ? 'cell shows a result' : 'cells show results'} that this page could not compute after your edit. A save computes ${count === 1 ? 'it' : 'them'} again.`;
     staleNote.hidden = false;
   }
 
   /*
-    What `recalculate()` could not do. A formula that reads through
-    `INDIRECT` or `OFFSET`, or an array formula, has no result in a saved ods
-    and keeps its old one in an xlsx. A cell in a cycle has no result.
+    What `recalculate()` could not do: a formula with a function that the
+    evaluator does not know, or a cycle in a document that does not iterate.
   */
   function showUncomputed(recalc: any) {
     const count = (recalc?.unevaluated?.length ?? 0) + (recalc?.circular?.length ?? 0);
@@ -481,6 +494,7 @@ export function mountViewer({
     const changeable = canEdit || canMark;
     penBtn.hidden = !changeable;
     saveBtn.hidden = !changeable;
+    findOpenBtn.hidden = !canFind;
     penEdit.hidden = canMark;
     penMark.hidden = !canMark;
     const penLabel = canMark
@@ -527,7 +541,7 @@ export function mountViewer({
       ? 'Select text, then a tool, to mark it once. A pressed tool marks every selection; Draw draws on the page.'
       : sheet
         ? canFormat
-          ? 'Type into a cell; Alt+Enter breaks a line. Drag over cells, or click a header, to format them or to add and remove rows and columns.'
+          ? 'Type a value or a formula such as =SUM(B2:B4) into a cell; the sheet computes as you go. Drag over cells, or click a header, to format them or to add and remove rows and columns.'
           : 'Type into a cell; Enter keeps the value, Escape drops it. Click a header to add and remove rows and columns. A csv has no styles.'
         : canFormat
           ? 'Type into the document. Select some text for the buttons, or Ctrl+B, I and U.'
@@ -624,9 +638,11 @@ export function mountViewer({
     file takes the same calls, with a log of one `setContent`.
 
     A sheet is recalculated before it is saved. `save()` would do that too,
-    but only `recalculate()` names the formula cells it touched. When it
-    names any, the sheet is rendered again, so the page shows what the file
-    now holds.
+    but only `recalculate()` names the formula cells it touched. The page
+    computes its formula cells itself, so it already shows those results.
+    Only if the page left some cells stale, and the recalculation names any
+    cell, is the sheet rendered again, so the page shows what the file now
+    holds. Otherwise the frame stays, with its scroll and its selection.
   */
   async function saveDocument() {
     if (!currentDoc) return;
@@ -650,7 +666,9 @@ export function mountViewer({
         saveBytes(currentDoc.save(), currentName);
         // The page and the file agree now: its log resets, undo starts over.
         send({ type: 'committed' });
-        if (recalc && Object.values(recalc).some((cells: any) => cells.length)) renderAgain();
+        if (staleCount && recalc && Object.values(recalc).some((cells: any) => cells.length)) {
+          renderAgain();
+        }
         showUncomputed(recalc);
       }
       discardArmed = false;
@@ -694,6 +712,8 @@ export function mountViewer({
     savedMarks = 0;
     armedTool = null;
     discardArmed = false;
+    canFind = false;
+    showFind(false);
     paintChrome();
     showAlert(null);
     showStale(0);
@@ -793,6 +813,14 @@ export function mountViewer({
         sheet = m.sheet === true;
         canFormat = canEdit && !plainText && !(sheet && m.sheetStyles === false);
         canMark = canMark && m.annotatable === true;
+        canFind = m.searchable === true;
+        // A frame rendered again after a save has lost the hits, so the
+        // search runs again.
+        if (canFind && !findStrip.hidden && findText.value) {
+          send({ type: 'search', text: findText.value, step: 0 });
+        } else if (!canFind) {
+          showFind(false);
+        }
         paintZoom(m.zoom);
         zoomBar.hidden = false;
         paintChrome();
@@ -807,7 +835,11 @@ export function mountViewer({
         paintChrome();
         break;
       case 'escape':
-        if (modeOn) setMode(false);
+        if (!findStrip.hidden) showFind(false);
+        else if (modeOn) setMode(false);
+        break;
+      case 'find':
+        if (canFind) showFind(true);
         break;
       case 'operations':
       case 'annotations': {
@@ -857,6 +889,9 @@ export function mountViewer({
       case 'selectionChange':
         paintSelection(detail ?? {});
         break;
+      case 'searchChange':
+        paintFind(detail ?? {});
+        break;
       case 'annotationChange':
         // The count of pending marks after each change: a mark, a finished
         // stroke, an undo, a removal and a clear.
@@ -881,6 +916,44 @@ export function mountViewer({
   function nudgeZoom(factor: number) {
     const value = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, currentZoom * factor));
     send({ type: 'setZoom', value });
+  }
+
+  /*
+    The search is the page's: `odr.search` marks every hit, also in the parts
+    that the page has not laid out, and scrolls to the selected one. The
+    strip only sends the text and the steps, and shows the count that comes
+    back. Closing the strip takes the marks away.
+  */
+  let findTimer: number | undefined;
+  function showFind(on: boolean) {
+    window.clearTimeout(findTimer);
+    findStrip.hidden = !on;
+    findOpenBtn.setAttribute('aria-expanded', String(on));
+    if (on) {
+      findText.focus();
+      findText.select();
+      return;
+    }
+    if (findText.value) send({ type: 'search', text: '', step: 0 });
+    findText.value = '';
+    paintFind({});
+  }
+
+  /* `current` is the place of the selected hit, from 0. While `complete` is
+     false, the parts that have not loaded can still add hits. */
+  function paintFind(state: { count?: number; current?: number; complete?: boolean }) {
+    const count = Number(state.count) || 0;
+    const more = state.complete === false;
+    findPreviousBtn.disabled = count === 0;
+    findNextBtn.disabled = count === 0;
+    if (!findText.value) findCount.textContent = '';
+    else if (count === 0) findCount.textContent = more ? 'Searching…' : 'No hits';
+    else findCount.textContent = `${(state.current ?? 0) + 1} of ${count.toLocaleString()}${more ? '…' : ''}`;
+  }
+
+  function search(step: number) {
+    window.clearTimeout(findTimer);
+    send({ type: 'search', text: findText.value, step });
   }
 
   /* `bytes` null opens a blank document of the type that `name` says. */
@@ -928,7 +1001,13 @@ export function mountViewer({
     // it is made, which is what a touch screen needs, because there is no
     // button to press while a selection stands. `pdfEnforcePermissions`: a
     // pdf that refuses a copy refuses it here too.
+    //
+    // `lazyLayout`: the browser lays out only the lines, rows, pages and
+    // slides near the viewport, so a long document shows its first frame
+    // early. It is the default, but it is stated here because the search
+    // strip exists for it: the find of the browser misses the rest.
     const options: Record<string, unknown> = {
+      lazyLayout: true,
       editable: editableFormat,
       spreadsheetCellLimit: SHEET_CELL_BUDGET,
       textDocumentMargin,
@@ -1267,6 +1346,26 @@ export function mountViewer({
   }
   undoBtn.addEventListener('click', () => send({ type: 'undo' }));
   redoBtn.addEventListener('click', () => send({ type: 'redo' }));
+
+  findOpenBtn.addEventListener('click', () => showFind(findStrip.hidden === true));
+  findCloseBtn.addEventListener('click', () => showFind(false));
+  findPreviousBtn.addEventListener('click', () => search(-1));
+  findNextBtn.addEventListener('click', () => search(1));
+  // A search per pause in the typing, not per key.
+  findText.addEventListener('input', () => {
+    window.clearTimeout(findTimer);
+    findTimer = window.setTimeout(() => search(0), 200);
+  });
+  findText.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      search(e.shiftKey ? -1 : 1);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      showFind(false);
+      currentFrame?.focus();
+    }
+  });
 
   zoomInBtn.addEventListener('click', () => nudgeZoom(ZOOM_STEP));
   zoomOutBtn.addEventListener('click', () => nudgeZoom(1 / ZOOM_STEP));
