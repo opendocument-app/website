@@ -1,0 +1,204 @@
+---
+/*
+  The start screen of the web app at `/web`, in place of the drop zone that
+  the demo and `/tryit` show. It is laid out as the start screen of an office
+  app: new documents first, then a way to open a file, then the recent files.
+  There are no samples, because the app is for the user's own files.
+
+  It carries the same `data-viewer-*` elements as `Panel.astro`, because the
+  viewer finds its idle, busy, error and password states by those attributes.
+  The recent files are not the viewer's business: `web-app.ts` fills
+  `data-web-recent` from the handles it keeps.
+*/
+import Icon from '../Icon.astro';
+
+/*
+  The new documents, by type. Each type has the formats `odr.create` can make
+  for it, the OpenDocument format first. The page of a type makes the first
+  format; the chips under it choose. The viewer checks each format against
+  the capability `create` of the engine on a click.
+
+  There is no presentation, because core 7.7.0 cannot create one: ODP and
+  PPTX open, edit and save, but they do not have `create`. Add the type here
+  when core can create it.
+*/
+const types = [
+  {
+    kind: 'text',
+    label: 'Text document',
+    formats: [
+      { ext: 'odt', app: 'OpenDocument' },
+      { ext: 'docx', app: 'Word' },
+    ],
+  },
+  {
+    kind: 'sheet',
+    label: 'Spreadsheet',
+    formats: [
+      { ext: 'ods', app: 'OpenDocument' },
+      { ext: 'xlsx', app: 'Excel' },
+    ],
+  },
+] as const;
+
+const band = { text: 'bg-brand-text', sheet: 'bg-brand-sheet' } as const;
+const ink = { text: 'text-brand-text', sheet: 'text-brand-sheet' } as const;
+---
+
+<div data-viewer-panel class="h-full">
+  <!-- The whole screen takes a drop. The border is transparent until a file
+       is dragged over the window; the viewer then colours it. -->
+  <div data-viewer-zone class="h-full overflow-y-auto border-2 border-transparent transition-colors">
+    <div class="mx-auto max-w-4xl px-5 py-8 sm:px-8 sm:py-12">
+      <div class="flex items-center">
+        <div
+          data-viewer-spinner
+          hidden
+          class="mr-4 h-8 w-8 shrink-0 animate-spin rounded-full border-[3px] border-outline-variant border-t-primary"
+        >
+        </div>
+        <!-- The idle state needs no icon here, so the upload icon stays
+             hidden by its class. The lock shows for an encrypted document. -->
+        <div data-viewer-idle-icon class="shrink-0">
+          <span data-viewer-icon-upload class="hidden"></span>
+          <span
+            data-viewer-icon-lock
+            hidden
+            class="mr-4 flex h-10 w-10 items-center justify-center rounded-full bg-primary-container text-on-primary-container"
+          >
+            <Icon name="lock" class="h-5 w-5" />
+          </span>
+        </div>
+        <div class="min-w-0">
+          <h1 data-viewer-status class="text-2xl font-semibold tracking-tight">Start</h1>
+          <p data-viewer-hint class="mt-1 text-sm text-on-surface-variant"></p>
+        </div>
+      </div>
+
+      <form data-viewer-password hidden class="mt-6 flex w-full max-w-sm flex-col gap-3">
+        <label class="sr-only" for="viewer-password">Password</label>
+        <input
+          data-viewer-password-input
+          id="viewer-password"
+          type="password"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="Password"
+          class="w-full rounded-full border border-outline-variant bg-surface px-4 py-2.5 text-sm outline-none focus:border-primary"
+        />
+        <div class="flex items-center gap-3">
+          <button
+            type="submit"
+            class="rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-on-primary transition-opacity hover:opacity-90"
+          >
+            Open
+          </button>
+          <button
+            data-viewer-password-cancel
+            type="button"
+            class="rounded-full border border-outline-variant px-5 py-2.5 text-sm font-medium transition-colors hover:bg-surface-container"
+          >
+            Cancel
+          </button>
+        </div>
+      </form>
+
+      <div data-viewer-actions class="mt-10 flex flex-col gap-10">
+        <section aria-labelledby="home-new">
+          <h2 id="home-new" class="mb-4 text-sm font-medium text-on-surface-variant">New</h2>
+          <div class="grid max-w-2xl grid-cols-2 gap-4 sm:grid-cols-4 sm:gap-5">
+            {
+              types.map((t) => (
+                <div class="flex flex-col gap-2.5">
+                  <button
+                    data-viewer-blank={t.formats[0].ext}
+                    type="button"
+                    title={`A new ${t.label.toLowerCase()} (${t.formats[0].ext.toUpperCase()})`}
+                    class="group rounded-xl text-left outline-offset-4"
+                  >
+                    <span class="relative block aspect-[4/5] w-full overflow-hidden rounded-xl border border-outline-variant bg-surface shadow-sm transition group-hover:-translate-y-0.5 group-hover:border-primary group-hover:shadow-md motion-reduce:group-hover:translate-y-0">
+                      <span class:list={['block h-1.5 w-full', band[t.kind]]} />
+                      {t.kind === 'text' ? (
+                        <span class="flex flex-col gap-2 p-[14%]">
+                          <span class="h-2 w-1/2 rounded bg-surface-variant" />
+                          <span class="mt-1 h-1.5 w-full rounded bg-surface-variant/70" />
+                          <span class="h-1.5 w-full rounded bg-surface-variant/70" />
+                          <span class="h-1.5 w-4/5 rounded bg-surface-variant/70" />
+                        </span>
+                      ) : (
+                        <span class="grid grid-cols-3 gap-px p-[14%]">
+                          {Array.from({ length: 12 }).map((_, i) => (
+                            <span
+                              class:list={[
+                                'h-3 rounded-[2px]',
+                                i < 3 ? 'bg-brand-sheet/25' : 'bg-surface-variant/70',
+                              ]}
+                            />
+                          ))}
+                        </span>
+                      )}
+                      <span class="absolute bottom-3 right-3 flex h-8 w-8 items-center justify-center rounded-full bg-primary text-on-primary opacity-0 shadow transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                        <Icon name="plus" class="h-4 w-4" />
+                      </span>
+                    </span>
+                  </button>
+                  <div class="px-0.5">
+                    <p class="text-sm font-medium">{t.label}</p>
+                    <div class="mt-1.5 flex flex-wrap gap-1.5">
+                      {t.formats.map((f) => (
+                        <button
+                          data-viewer-blank={f.ext}
+                          type="button"
+                          title={`A new ${t.label.toLowerCase()} for ${f.app} (${f.ext.toUpperCase()})`}
+                          class:list={[
+                            'rounded-full border border-outline-variant px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide transition-colors hover:border-current hover:bg-surface-container',
+                            ink[t.kind],
+                          ]}
+                        >
+                          {f.ext}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+        </section>
+
+        <section aria-labelledby="home-open">
+          <h2 id="home-open" class="mb-4 text-sm font-medium text-on-surface-variant">Open</h2>
+          <div
+            class="flex flex-col items-start gap-4 rounded-2xl border border-outline-variant bg-surface-container/50 p-5 sm:flex-row sm:items-center"
+          >
+            <button
+              data-viewer-pick
+              type="button"
+              class="flex shrink-0 items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-on-primary transition-opacity hover:opacity-90"
+            >
+              <Icon name="folder" class="h-4 w-4" />
+              Open a file…
+            </button>
+            <p data-web-open-hint class="text-sm leading-relaxed text-on-surface-variant">
+              ODT, ODS, ODP, DOCX, XLSX, PPTX, PDF and more. The file stays on this device.
+            </p>
+          </div>
+        </section>
+
+        <!-- Filled by `web-app.ts`. Shown only where the browser can keep a
+             handle to a file, which is Chromium. -->
+        <section data-web-recent hidden aria-labelledby="home-recent">
+          <h2 id="home-recent" class="mb-4 text-sm font-medium text-on-surface-variant">Recent</h2>
+          <p data-web-recent-note hidden class="mb-3 text-sm text-on-surface-variant"></p>
+          <ul
+            data-web-recent-list
+            class="divide-y divide-outline-variant overflow-hidden rounded-2xl border border-outline-variant"
+          >
+          </ul>
+        </section>
+      </div>
+
+      <input data-viewer-file type="file" class="sr-only" />
+    </div>
+  </div>
+</div>

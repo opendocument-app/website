@@ -1,6 +1,6 @@
 /*
-  The viewer, shared by the demo section on the homepage and the full-screen
-  page at `/tryit`. Both mount this against their own markup: every control is
+  The viewer, shared by the demo section on the homepage, the full-screen
+  page at `/tryit` and the web app at `/web`. Each mounts this against their own markup: every control is
   found by a `data-viewer-*` attribute inside the root element, and the ones a
   layout leaves out are simply absent rather than fatal.
 
@@ -205,13 +205,40 @@ export interface ViewerOptions {
    * apps do, while the demo's 32rem box would spend most of it on margins.
    */
   textDocumentMargin?: boolean;
+  /**
+   * Write a save back to the file it came from, where the browser gives the
+   * page a handle to that file. Only the installable app at `/web` sets this.
+   * The demo and `/tryit` keep the download, because a page in a tab must not
+   * look like it changes files on the disk.
+   */
+  saveInPlace?: boolean;
+  /** The words of the idle panel, where a page wants its own. */
+  idleTitle?: string;
+  idleHint?: string;
+  /**
+   * Told when a document shows, and with `null` when it goes. `handle` is the
+   * file that a save writes to, if there is one. `/web` uses this for the
+   * title of the window and for the list of recent files.
+   */
+  onDocument?: (doc: { name: string; handle: FileSystemFileHandle | null } | null) => void;
+}
+
+/** What `mountViewer` gives back to the page that mounts it. */
+export interface Viewer {
+  /** Opens a file, as a drop or a pick does. A `handle` lets a save write back
+   *  to the file, where `saveInPlace` is on. */
+  openFile(file: File, handle?: FileSystemFileHandle | null): Promise<void>;
 }
 
 export function mountViewer({
   root,
   scrollTarget = null,
   textDocumentMargin = false,
-}: ViewerOptions) {
+  saveInPlace = false,
+  idleTitle = IDLE_TITLE,
+  idleHint = IDLE_HINT,
+  onDocument,
+}: ViewerOptions): Viewer {
   const find = <T extends HTMLElement>(name: string) =>
     root.querySelector<T>(`[data-viewer-${name}]`);
   const need = <T extends HTMLElement>(name: string) => {
@@ -297,6 +324,9 @@ export function mountViewer({
   /** What to call the bytes a save hands back; the type the document opened as. */
   let currentMime = 'application/octet-stream';
   let currentName = 'document';
+  /** The file on the disk that a save writes back to. Only with `saveInPlace`,
+      and only where the browser gave the page a handle to the file. */
+  let currentHandle: FileSystemFileHandle | null = null;
 
   /** What the open document takes, settled once the frame reports in. */
   let canEdit = false;
@@ -556,9 +586,11 @@ export function mountViewer({
     penBtn.classList.toggle('hover:bg-surface', !modeOn);
 
     saveBtn.disabled = !dirty();
-    const saveLabel = canMark
-      ? 'Save this PDF with your marks'
-      : 'Save this document with your changes';
+    const saveLabel = currentHandle
+      ? `Save your ${canMark ? 'marks' : 'changes'} to ${currentName}`
+      : canMark
+        ? 'Save this PDF with your marks'
+        : 'Save this document with your changes';
     saveBtn.title = saveLabel;
     saveBtn.setAttribute('aria-label', saveLabel);
 
@@ -651,6 +683,10 @@ export function mountViewer({
     as, so a browser that still has the original puts this one beside it - the
     page cannot overwrite anything, and should not look like it did.
 
+    The installed app is the exception. If the browser gave it a handle to the
+    file, `writeBytes` writes the save back to that file. If the browser
+    refuses the write, the save is a download again, so the work is not lost.
+
     `Uint8Array<ArrayBuffer>` rather than the plain alias: the engine copies the
     save out of the wasm heap into a buffer of its own, and a `Blob` takes no
     view that might be over a shared one.
@@ -664,6 +700,21 @@ export function mountViewer({
     // Revoked on the next task rather than this one: Safari reads the url after
     // the click returns.
     setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  async function writeBytes(bytes: Uint8Array<ArrayBuffer>, name: string) {
+    if (currentHandle) {
+      try {
+        // The browser asks the user for write access on the first save.
+        const writable = await currentHandle.createWritable();
+        await writable.write(bytes);
+        await writable.close();
+        return;
+      } catch {
+        // Refused or failed: the download below still gives the user the file.
+      }
+    }
+    saveBytes(bytes, name);
   }
 
   /*
@@ -684,8 +735,37 @@ export function mountViewer({
     cell, is the sheet rendered again, so the page shows what the file now
     holds. Otherwise the frame stays, with its scroll and its selection.
   */
+  /*
+    A new document in the installed app has no file yet. Its first save asks
+    where to put it, as a "Save as" does, and every later save writes there.
+    This must happen first in the click, because the browser opens its picker
+    only shortly after a click.
+  */
+  const savePicker = saveInPlace ? (window as any).showSaveFilePicker : undefined;
+
+  async function chooseTarget() {
+    if (currentHandle || !savePicker) return true;
+    const ext = currentName.slice(currentName.lastIndexOf('.'));
+    try {
+      currentHandle = await savePicker.call(window, {
+        suggestedName: currentName,
+        types: [{ description: currentName.slice(currentName.lastIndexOf('.') + 1).toUpperCase(), accept: { [currentMime]: [ext] } }],
+      });
+    } catch (e: any) {
+      // A cancel is no error: nothing was saved, and the changes stay.
+      if (e?.name === 'AbortError') return false;
+      // Any other refusal: the save is a download, as in a browser tab.
+      return true;
+    }
+    currentName = currentHandle!.name;
+    filename.textContent = currentName;
+    onDocument?.({ name: currentName, handle: currentHandle });
+    return true;
+  }
+
   async function saveDocument() {
     if (!currentDoc) return;
+    if (!(await chooseTarget())) return;
     showAlert(null);
     saveBtn.disabled = true;
     // The engine works synchronously, so the disabled button has to paint
@@ -696,14 +776,14 @@ export function mountViewer({
       if (canMark) {
         const payload = await ask('getAnnotations');
         if (!payload) throw new Error('The marks could not be read back.');
-        saveBytes(currentDoc.annotate(payload), currentName);
+        await writeBytes(currentDoc.annotate(payload), currentName);
         savedMarks = marks;
       } else {
         const payload = await ask('getOperations');
         if (!payload) throw new Error('The edits could not be read back.');
         if (JSON.parse(payload).ops.length) currentDoc.edit(payload);
         const recalc = sheet ? currentDoc.recalculate() : null;
-        saveBytes(encrypted ? currentDoc.save(savePassword ?? '') : currentDoc.save(), currentName);
+        await writeBytes(encrypted ? currentDoc.save(savePassword ?? '') : currentDoc.save(), currentName);
         // The page and the file agree now: its log resets, undo starts over.
         send({ type: 'committed' });
         if (staleCount && recalc && Object.values(recalc).some((cells: any) => cells.length)) {
@@ -764,6 +844,8 @@ export function mountViewer({
     showStale(0);
     currentDoc?.close();
     currentDoc = null;
+    currentHandle = null;
+    onDocument?.(null);
     frameHost.replaceChildren();
     currentFrame = null;
     zoomBar.hidden = true;
@@ -1002,8 +1084,9 @@ export function mountViewer({
   }
 
   /* `bytes` null opens a blank document of the type that `name` says. */
-  async function open(bytes: Uint8Array | null, name: string) {
+  async function open(bytes: Uint8Array | null, name: string, handle: FileSystemFileHandle | null) {
     teardown();
+    currentHandle = saveInPlace ? handle : null;
     setBusy('Loading the renderer…');
 
     let odr;
@@ -1160,6 +1243,7 @@ export function mountViewer({
 
     showResult(true);
     mountFrame(html);
+    onDocument?.({ name, handle: currentHandle });
   }
 
   function answers(question: () => boolean) {
@@ -1176,9 +1260,13 @@ export function mountViewer({
     is one net, and it says the true thing: this document did not open, here
     is why, and the panel is back.
   */
-  async function openSafely(bytes: Uint8Array | null, name: string) {
+  async function openSafely(
+    bytes: Uint8Array | null,
+    name: string,
+    handle: FileSystemFileHandle | null = null,
+  ) {
     try {
-      await open(bytes, name);
+      await open(bytes, name, handle);
     } catch (e: any) {
       teardown();
       showResult(false);
@@ -1190,15 +1278,35 @@ export function mountViewer({
     }
   }
 
-  async function openFile(file: File) {
+  async function openFile(file: File, handle: FileSystemFileHandle | null = null) {
     if (wouldDiscard()) return;
     scrollTarget?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     showResult(false);
     setBusy(`Reading ${file.name}…`);
-    await openSafely(new Uint8Array(await file.arrayBuffer()), file.name);
+    await openSafely(new Uint8Array(await file.arrayBuffer()), file.name, handle);
   }
 
-  pickBtn.addEventListener('click', () => fileInput.click());
+  /*
+    With `saveInPlace`, the pick uses the file picker of the browser where one
+    exists, because only that picker gives a handle that a save can write to.
+    The `<input>` stays the fallback for every other browser.
+  */
+  const openPicker = saveInPlace ? (window as any).showOpenFilePicker : undefined;
+  pickBtn.addEventListener('click', async () => {
+    if (!openPicker) {
+      fileInput.click();
+      return;
+    }
+    let handle: FileSystemFileHandle;
+    try {
+      [handle] = await openPicker.call(window, { multiple: false });
+    } catch (e: any) {
+      // A cancelled pick is an `AbortError` and needs no message.
+      if (e?.name !== 'AbortError') fileInput.click();
+      return;
+    }
+    void openFile(await handle.getFile(), handle);
+  });
   fileInput.addEventListener('change', () => {
     const file = fileInput.files?.[0];
     if (file) void openFile(file);
@@ -1250,7 +1358,7 @@ export function mountViewer({
 
   function cancelPassword() {
     teardown();
-    setIdle(IDLE_TITLE, IDLE_HINT);
+    setIdle(idleTitle, idleHint);
   }
 
   passwordCancelBtn.addEventListener('click', cancelPassword);
@@ -1263,7 +1371,7 @@ export function mountViewer({
     // `teardown` drops the frame along with the document.
     teardown();
     showResult(false);
-    setIdle(IDLE_TITLE, IDLE_HINT);
+    setIdle(idleTitle, idleHint);
   });
 
   /* The full-screen page opens empty: a navigation drops the wasm heap the
@@ -1302,12 +1410,23 @@ export function mountViewer({
     dragDepth = 0;
     highlight(false);
     const file = e.dataTransfer.files[0];
-    if (file) void openFile(file);
+    if (!file) return;
+    /* A drop can give a handle too, in Chromium. The call must happen during
+       the event, because the data of the drop is gone after it. */
+    const asHandle = saveInPlace ? (e.dataTransfer.items[0] as any)?.getAsFileSystemHandle : undefined;
+    if (!asHandle) {
+      void openFile(file);
+      return;
+    }
+    const pending: Promise<any> = asHandle.call(e.dataTransfer.items[0]);
+    void pending
+      .then((h) => (h?.kind === 'file' ? openFile(file, h) : openFile(file)))
+      .catch(() => openFile(file));
   });
 
-  if (!CAN_DROP) {
-    status.textContent = IDLE_TITLE;
-  }
+  // The markup has the words of the demo; a page can ask for its own.
+  status.textContent = idleTitle;
+  hint.textContent = idleHint;
 
   penBtn.addEventListener('click', () => setMode(!modeOn));
   saveBtn.addEventListener('click', () => void saveDocument());
@@ -1465,4 +1584,6 @@ export function mountViewer({
   zoomLabel.addEventListener('click', () => send({ type: 'resetZoom' }));
 
   window.addEventListener('pagehide', teardown);
+
+  return { openFile };
 }

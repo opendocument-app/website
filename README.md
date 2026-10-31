@@ -38,6 +38,10 @@ fine in `dev`; check the viewer with `npm run build && npm run preview`.
 | `src/pages/index.astro` | the single page — composes the sections below |
 | `src/pages/privacy.astro` | the privacy policy, carried over verbatim from the author's blog |
 | `src/pages/tryit.astro` | the viewer with the whole window to itself |
+| `src/pages/web.astro` | the installable web app: the same viewer, with a manifest and a service worker |
+| `src/components/viewer/AppHome.astro` | the start screen of the web app, in place of the drop zone |
+| `src/scripts/web-app.ts` | what makes `/web` an app: launched files, the install button, updates |
+| `public/web.webmanifest` | the manifest of the web app |
 | `src/scripts/viewer.ts` | the viewer itself — one implementation, mounted by both |
 | `src/components/viewer/` | the markup those two share: the idle panel and the bar |
 | `src/components/Demo.astro` | the viewer as one section of the homepage |
@@ -47,6 +51,8 @@ fine in `dev`; check the viewer with `npm run build && npm run preview`.
 | `src/scripts/frame-bridge.js` | the one script of ours inside the frame; the viewer's other half |
 | `public/samples/` | one sample document per format, the same content saved as each |
 | `scripts/sync-odr.mjs` | vendors the wasm renderer into `public/odr/` |
+| `scripts/web-sw.js` | the service worker of the web app, as a template |
+| `scripts/build-web-sw.mjs` | writes `dist/web-sw.js` from the template after the build |
 
 ## The demo
 
@@ -280,6 +286,63 @@ it.
   another, says so above the frame and lets the second attempt through. The
   page blocks on no dialog.
 
+## The web app
+
+`/web` is the viewer as an installable app (a PWA). It is an experiment next
+to the store apps, not a replacement for them, so it is offered only on a
+computer.
+
+- **The scope is `/web`.** The manifest and the service worker cover only this
+  page. The homepage and `/tryit` register no worker, so a visitor of the
+  website never downloads the renderer (about 6 MB) for later.
+- **It looks like an app, not like the demo.** `AppHome.astro` is its start
+  screen: "New" tiles by type (text document, spreadsheet), each with the
+  formats `odr.create` makes for it (ODT or DOCX, ODS or XLSX). There is no
+  presentation, because core cannot create ODP or PPTX yet. Then "Open a file…",
+  and the recent files. It has no samples. It carries the same
+  `data-viewer-*` elements as `Panel.astro`, so the viewer needs no second
+  code path. The title of the window follows the open document.
+- **New documents get a file on the first save.** With `saveInPlace`, the
+  first save of a blank document asks where to put it
+  (`showSaveFilePicker`), and later saves write there. Without the picker, the
+  save is a download.
+- **Recent files** are kept as file handles in IndexedDB (`odr-web`). A click
+  asks the browser for access to the file again. Chromium only; the list is
+  hidden elsewhere.
+- **Shortcuts.** The menu of the app icon has "New text document" and "New
+  spreadsheet", which open `/web?new=odt` and `/web?new=ods`.
+- **One cache holds one build.** `scripts/build-web-sw.mjs` runs as
+  `postbuild`. It lists the page, `/_astro/*`, `/odr/<version>/*` and the
+  icons, and it names the cache by a hash of their contents. The
+  worker serves those files only from its cache, so the page, the glue and the
+  wasm always come from the same build. This is the same rule as the versioned
+  `/odr/` path, for the same reason.
+- **An update waits.** A new build installs a new worker next to the old one.
+  The page shows "A new version is ready" with a restart button. If the user
+  does not restart, the new version starts the next time the app opens. A
+  restart reloads the page, so an open document closes.
+- **Files from the operating system.** The manifest has `file_handlers` for
+  the document formats of the engine (not its images, audio or video). The
+  page takes the files from `launchQueue`. Chromium on a computer only.
+- **A save writes back to the file** where the browser gave the page a handle:
+  a file from the launch queue, from `showOpenFilePicker`, or from a drop. The
+  viewer does this only when it is mounted with `saveInPlace`, which only
+  `/web` does. If the browser refuses the write, the save is a download again.
+- **Install.** The button in the bar shows only on a computer and only after
+  `beforeinstallprompt` (Chrome, Edge). Safari on macOS 17 and later gets an
+  "Add to Dock" hint. The manifest has `prefer_related_applications`, so Chrome
+  on Android offers the Play Store app instead of the web app.
+- **The platform of the visitor.** An inline script in `Base.astro` puts
+  `data-platform` (`android`, `ios`, `desktop`) on `<html>` before the body
+  paints. The "Get the app" button (`getApp` in `src/data/links.ts`) and the
+  order of the store badges read it with Tailwind's `in-data-[platform=…]`
+  variants. When the desktop app ships, change `primary.desktop` and the
+  desktop entry of `getApp`.
+
+To test the worker, use `npm run build` and `npm run preview`. `astro dev`
+registers no worker. In Chrome, DevTools → Application shows the manifest, the
+worker and the cache.
+
 ## Deployment
 
 Pushes to `main` build and deploy to Firebase Hosting via
@@ -306,8 +369,9 @@ JSON has no comments, so the reasoning lives here:
   the annotator, the zoom — and the bridge is inline too, so refusing inline
   script is refusing everything the pen does. It could not be narrowed to
   hashes, because the frame has an opaque origin and a `blob:` or `'self'`
-  script would not load there. The page itself has no inline script: Astro
-  bundles its own. What `'unsafe-inline'` also permits, a `javascript:` url
+  script would not load there. The page itself has one inline script, the
+  platform check in `Base.astro`, which must run before the body paints.
+  Astro bundles the rest. What `'unsafe-inline'` also permits, a `javascript:` url
   in a dropped document, runs in the frame's opaque origin and reaches
   nothing — see the demo.
 - **`frame-src blob:`** is left over from the `blob:` URL the demo used to
@@ -328,6 +392,9 @@ JSON has no comments, so the reasoning lives here:
 - **`/odr/index.js` is `no-store`.** It is the generated forwarder to the
   current version — two `export` lines, no renderer of its own — and a cached
   copy of it could pin a version, which is the whole thing being avoided.
+- **`/web-sw.js` and `/web.webmanifest` are `no-cache`.** The browser must see
+  a new worker and a new manifest as soon as a build is live. The manifest
+  also gets `application/manifest+json`.
 - **`/app-ads.txt`** is served as plain text and cached for an hour. It carries
   the AdMob publisher line (`pub-8161473686436957`) and must stay reachable at
   the domain root, or ad revenue on the free apps breaks. It is not decoration.

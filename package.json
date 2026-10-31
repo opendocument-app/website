@@ -9,6 +9,7 @@
     "predev": "node scripts/sync-odr.mjs",
     "build": "astro build",
     "prebuild": "node scripts/sync-odr.mjs",
+    "postbuild": "node scripts/build-web-sw.mjs",
     "preview": "astro preview",
     "check": "astro check"
   },

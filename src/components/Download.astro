@@ -19,18 +19,37 @@ import { primary, stores } from '../data/links';
         <h2 class="text-3xl font-bold tracking-tight sm:text-4xl">Get OpenDocument Reader</h2>
         <p class="mx-auto mt-4 max-w-xl text-lg leading-relaxed text-on-surface-variant">
           Free on Android and iOS, and on F-Droid or Obtainium for a build with no
-          proprietary dependencies at all.
+          proprietary dependencies at all. On a computer, it runs in your browser.
         </p>
 
         <div class="mt-9 flex flex-wrap items-center justify-center gap-6">
           <StoreBadge store="play" href={primary.android} />
-          <StoreBadge store="appstore" href={primary.ios} />
+          <StoreBadge store="appstore" href={primary.ios} class="in-data-[platform=ios]:order-first" />
           <StoreBadge store="fdroid" href={primary.fdroid} />
           <StoreBadge store="obtainium" href={primary.obtainium} />
         </div>
 
+        <!-- The way in on a computer. Outlined in the brand colour there,
+             because it is the one option that platform has. -->
         <div
-          class="mx-auto mt-10 flex max-w-lg flex-col items-center gap-3 rounded-2xl border border-outline-variant bg-surface p-5 sm:flex-row sm:text-left"
+          class="mx-auto mt-10 flex max-w-lg flex-col items-center gap-4 rounded-2xl border border-outline-variant bg-surface p-5 sm:flex-row sm:text-left in-data-[platform=desktop]:border-primary"
+        >
+          <Icon name="monitor" class="h-5 w-5 shrink-0 text-primary" />
+          <p class="text-sm leading-relaxed text-on-surface-variant">
+            <span class="font-medium text-on-surface">On a computer</span>, open it in your
+            browser. Chrome and Edge can also install it as an app that opens your documents
+            from the desktop, also without a connection.
+          </p>
+          <a
+            href={primary.desktop}
+            class="shrink-0 whitespace-nowrap rounded-full bg-primary px-4 py-2 text-sm font-medium text-on-primary transition-opacity hover:opacity-90"
+          >
+            Open the web app
+          </a>
+        </div>
+
+        <div
+          class="mx-auto mt-4 flex max-w-lg flex-col items-center gap-3 rounded-2xl border border-outline-variant bg-surface p-5 sm:flex-row sm:text-left"
         >
           <Icon name="heart" class="h-5 w-5 shrink-0 text-primary" />
           <p class="text-sm leading-relaxed text-on-surface-variant">

@@ -137,6 +137,10 @@ const marks = [
       <Icon name="close" class="h-4 w-4" />
     </button>
   </div>
+
+  <!-- Outside the document half, so it shows also when no document is open:
+       `/web` puts its install button here. -->
+  <slot name="end" />
 </div>
 
 <!-- What the search button opens. Enter goes to the next hit, Shift+Enter to

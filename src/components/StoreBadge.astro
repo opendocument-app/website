@@ -21,8 +21,10 @@ interface Props {
   href: string;
   /** Rendered height of the button itself, clear space excluded. */
   height?: number;
+  /** Extra classes on the link, for example to put it first on one platform. */
+  class?: string;
 }
-const { store, href, height = 48 } = Astro.props;
+const { store, href, height = 48, class: className } = Astro.props;
 
 // Fraction of the PNG frame's height occupied by the button, from the alpha
 // bounding box. The horizontal inset is the same 41px, so one bleed covers both
@@ -66,7 +68,10 @@ const bleed = (frameHeight - height) / 2;
   href={href}
   target="_blank"
   rel="noopener"
-  class="inline-block shrink-0 transition-transform duration-200 hover:scale-[1.03] motion-reduce:hover:scale-100"
+  class:list={[
+    'inline-block shrink-0 transition-transform duration-200 hover:scale-[1.03] motion-reduce:hover:scale-100',
+    className,
+  ]}
   style={bleed ? `margin:${-bleed}px` : undefined}
 >
   <img

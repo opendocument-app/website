@@ -1,7 +1,17 @@
 ---
 import Logo from './Logo.astro';
 import Icon from './Icon.astro';
-import { primary, repos } from '../data/links';
+import { getApp, repos } from '../data/links';
+
+/* Only the button for the platform of the visitor shows; see `getApp`. The
+   class names are written out in full, because Tailwind finds them in the
+   source. */
+const show = {
+  android: 'hidden in-data-[platform=android]:block',
+  ios: 'hidden in-data-[platform=ios]:block',
+  desktop: 'hidden in-data-[platform=desktop]:block',
+  fallback: 'in-data-[platform]:hidden',
+} as const;
 
 const sections = [
   { href: '/#try', label: 'Try it' },
@@ -50,13 +60,20 @@ const sections = [
       <Icon name="github" class="h-5 w-5" />
     </a>
 
-    <a
-      href={primary.android}
-      target="_blank"
-      rel="noopener"
-      class="shrink-0 whitespace-nowrap rounded-full bg-primary px-4 py-2 text-sm font-medium text-on-primary transition-opacity hover:opacity-90"
-    >
-      Get the app
-    </a>
+    {
+      getApp.map((b) => (
+        <a
+          href={b.href}
+          target={b.external ? '_blank' : undefined}
+          rel={b.external ? 'noopener' : undefined}
+          class:list={[
+            'shrink-0 whitespace-nowrap rounded-full bg-primary px-4 py-2 text-sm font-medium text-on-primary transition-opacity hover:opacity-90',
+            show[b.platform],
+          ]}
+        >
+          {b.label}
+        </a>
+      ))
+    }
   </nav>
 </header>

@@ -40,7 +40,23 @@ export const primary = {
   ios: stores.ios.free,
   fdroid: stores.fdroid,
   obtainium: stores.obtainium,
+  /* A computer gets the web app, until there is a desktop app. When it ships,
+     point this at its download, and change the words in `getApp` below. */
+  desktop: '/web',
 } as const;
+
+/*
+  The one "get the app" button, per platform. `Base.astro` puts the platform
+  of the visitor on <html> as `data-platform`, and the button for that
+  platform shows. `fallback` is for a visitor without JavaScript, and for a
+  phone that is neither Android nor iOS.
+*/
+export const getApp = [
+  { platform: 'android', href: primary.android, label: 'Get the app', external: true },
+  { platform: 'ios', href: primary.ios, label: 'Get the app', external: true },
+  { platform: 'desktop', href: primary.desktop, label: 'Open the web app', external: false },
+  { platform: 'fallback', href: '/#download', label: 'Get the app', external: false },
+] as const;
 
 export const packages = {
   npm: 'https://www.npmjs.com/package/@opendocument/odr-core',

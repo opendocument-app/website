@@ -1,0 +1,143 @@
+---
+/*
+  The installable web app. It is the viewer of `/tryit`, with what makes it an
+  app around it:
+
+  - The start screen (`AppHome.astro`) is that of an office app: new
+    documents, a way to open a file, and the recent files. It has no samples.
+
+  - `web.webmanifest` names this page as the start and the scope of the app.
+  - The service worker (`scripts/build-web-sw.mjs`) keeps the page, its
+    scripts and the renderer in a cache, so the app opens offline.
+  - The launch queue hands the page the files that the operating system opens
+    with the app, and a save writes back to those files (`saveInPlace`).
+  - The install button shows only where the browser lets a page install
+    itself, and only on a computer: on a phone, the store apps come first.
+
+  `/tryit` stays the demo of the website. It registers no service worker, so a
+  visitor of the website never downloads the renderer for later.
+*/
+import Base from '../layouts/Base.astro';
+import Logo from '../components/Logo.astro';
+import Icon from '../components/Icon.astro';
+import AppHome from '../components/viewer/AppHome.astro';
+import Chrome from '../components/viewer/Chrome.astro';
+
+const pill =
+  'flex shrink-0 items-center gap-1.5 rounded-full border border-outline px-3 py-1 text-xs font-medium transition-colors hover:bg-surface';
+---
+
+<Base
+  title="OpenDocument Reader for the web"
+  description="Open ODT, ODS, ODP, DOCX, XLSX, PPTX and PDF files in your browser, edit a text document or a spreadsheet, mark up a PDF, and save the result. Install it as an app on your computer: it works offline, and nothing is uploaded."
+  bodyClass="overflow-hidden"
+>
+  <Fragment slot="head">
+    <link rel="manifest" href="/web.webmanifest" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="ODR" />
+  </Fragment>
+
+  <div id="viewer" class="flex h-[100dvh] flex-col">
+    <Chrome class="shrink-0 border-b border-outline-variant bg-surface-container px-3 py-2.5 sm:px-4">
+      <a
+        slot="lead"
+        data-web-home
+        href="/"
+        class="flex shrink-0 items-center gap-2 rounded-lg font-semibold tracking-tight transition-opacity hover:opacity-80"
+      >
+        <Logo class="h-7 w-7" title="OpenDocument Reader" />
+        <span class="hidden text-sm sm:inline">OpenDocument&nbsp;Reader</span>
+      </a>
+      <span
+        slot="lead"
+        data-viewer-open
+        hidden
+        class="hidden h-5 w-px shrink-0 bg-outline-variant sm:block"
+      ></span>
+
+      <!-- `ml-auto` pushes the pills to the right while no document is open.
+           With a document open, the document half takes the room. -->
+      <div slot="end" class="ml-auto flex shrink-0 items-center gap-2">
+        <!-- Chrome and Edge: the browser's own install dialog. -->
+        <button data-web-install hidden type="button" class={pill}>
+          <Icon name="download" class="h-3.5 w-3.5" />
+          Install app
+        </button>
+        <!-- Safari on macOS has no install event, only a menu item. -->
+        <button data-web-dock hidden type="button" popovertarget="web-dock-hint" class={pill}>
+          <Icon name="download" class="h-3.5 w-3.5" />
+          Add to Dock
+        </button>
+      </div>
+    </Chrome>
+
+    <main id="main" class="min-h-0 flex-1">
+      <AppHome />
+
+      <div data-viewer-result hidden class="h-full">
+        <div data-viewer-frame-host class="h-full w-full bg-surface-container"></div>
+      </div>
+    </main>
+  </div>
+
+  <div
+    id="web-dock-hint"
+    popover
+    class="mt-14 mr-4 mb-0 ml-auto max-w-xs rounded-2xl border border-outline-variant bg-surface p-4 text-sm leading-relaxed text-on-surface shadow-xl"
+  >
+    In Safari, choose <strong>File → Add to Dock</strong>. The app then opens in its own window,
+    also without a connection.
+  </div>
+
+  <!-- A new version is in the cache and waits for this one to close. -->
+  <div
+    data-web-update
+    hidden
+    role="status"
+    class="fixed bottom-4 left-1/2 z-50 flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 items-center gap-3 rounded-2xl border border-outline-variant bg-surface px-4 py-3 text-sm shadow-xl"
+  >
+    <p class="min-w-0 flex-1 leading-snug">A new version is ready.</p>
+    <button
+      data-web-update-now
+      type="button"
+      title="Restart the app now. An open document closes."
+      class="shrink-0 rounded-full bg-primary px-3 py-1 text-xs font-medium text-on-primary transition-opacity hover:opacity-90"
+    >
+      Restart
+    </button>
+    <button
+      data-web-update-later
+      type="button"
+      aria-label="Later"
+      title="Later. The new version starts the next time you open the app."
+      class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-surface-container"
+    >
+      <Icon name="close" class="h-4 w-4" />
+    </button>
+  </div>
+</Base>
+
+<script>
+  import { mountViewer } from '../scripts/viewer';
+  import { startWebApp } from '../scripts/web-app';
+
+  const root = document.getElementById('viewer');
+  if (root) {
+    // A touch screen cannot drop a file, so its hint says nothing about it.
+    const canDrop = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    const app = startWebApp();
+    const viewer = mountViewer({
+      root,
+      textDocumentMargin: true,
+      saveInPlace: true,
+      idleTitle: 'Start',
+      idleHint: canDrop
+        ? 'Make a new document, or open one. You can also drop a file anywhere in this window.'
+        : 'Make a new document, or open one.',
+      onDocument: app.documentChanged,
+    });
+    app.attach(viewer);
+  }
+</script>

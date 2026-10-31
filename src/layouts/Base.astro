@@ -36,6 +36,31 @@ const ogImage = new URL('/og.png', Astro.site).href;
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
 
+    <!--
+      The platform of the visitor, as an attribute on <html>, for the links
+      that send a visitor to the right download. It runs before the body paints,
+      so the right link shows first. CSS reads it with the `in-data-[platform=…]`
+      variants. Without JavaScript the attribute is absent, and the links fall
+      back to the download section.
+      iPadOS reports itself as a Mac, so a Mac with a touch screen is an iPad.
+      A phone that is neither Android nor iOS gets no attribute.
+    -->
+    <script is:inline>
+      (function () {
+        var ua = navigator.userAgent;
+        var p = /Android/.test(ua)
+          ? 'android'
+          : /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)
+            ? 'ios'
+            : /Mobi|Tablet/.test(ua)
+              ? ''
+              : 'desktop';
+        if (p) document.documentElement.setAttribute('data-platform', p);
+      })();
+    </script>
+
+    <slot name="head" />
+
     <!-- Smart App Banner on iOS Safari, carried over from the old site. -->
     <meta name="apple-itunes-app" content="app-id=1452061743" />
 
