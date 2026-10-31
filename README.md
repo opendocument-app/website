@@ -70,8 +70,8 @@ Several things about it are deliberate and easy to undo by accident:
   for the version. **One version is ever on the site**: `/odr/index.js` is a
   generated forwarder to it, for html cached from before a release, and there
   is no second copy of anything to be half loaded from.
-- **It loads on interaction, never on page load.** The wasm is 6.0 MB (about
-  2.2 MB gzipped), many times the rest of the page put together. The first
+- **It loads on interaction, never on page load.** The wasm is 6.1 MB (about
+  2.3 MB gzipped), many times the rest of the page put together. The first
   drop, file pick or sample click is what fetches it.
 - **The frame runs the renderer's scripts, and has no origin.** The iframe is
   sandboxed with `allow-scripts` and *without* `allow-same-origin`, which is
@@ -159,6 +159,21 @@ They differ in two deliberate ways:
 The full-screen page starts empty on purpose: a navigation drops the wasm heap
 the document lives in, so the link out of the demo cannot carry it over and
 says so in its `title`.
+
+### A password is asked for in the panel
+
+If `isPasswordEncrypted()` is true after `open`, the panel shows a password
+field in place of the samples. The viewer calls `decrypt()` in the wasm, so the
+password does not leave the page. A `WrongPassword` keeps the same document
+open and asks again. Cancel, Escape, or another file ends the prompt. Core
+7.7.0 decrypts ODF, docx, xlsx and pptx (agile and standard encryption), doc,
+xls and ppt (RC4, RC4 CryptoAPI, and XOR for xls), and Pages, Numbers and
+Keynote.
+
+An encrypted document gets no pen. The pen needs `isSavable(true)`, which asks
+for a save with the password, and core answers no for every format today. A
+save without the password would give a copy that anyone can open. If core
+starts to answer yes, the pen comes back, and the save passes the password.
 
 ### The frame is given the colour its document chose
 

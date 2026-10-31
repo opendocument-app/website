@@ -229,6 +229,11 @@ export function mountViewer({
   const status = need('status');
   const hint = need('hint');
   const actions = need('actions');
+  const passwordForm = need<HTMLFormElement>('password');
+  const passwordInput = need<HTMLInputElement>('password-input');
+  const passwordCancelBtn = need<HTMLButtonElement>('password-cancel');
+  const uploadIcon = need('icon-upload');
+  const lockIcon = need('icon-lock');
   const fileInput = need<HTMLInputElement>('file');
   const pickBtn = need<HTMLButtonElement>('pick');
   const sampleBtns = all<HTMLButtonElement>('sample');
@@ -324,6 +329,14 @@ export function mountViewer({
   /** Whether the page has `odr.search`, as the frame reports it. */
   let canFind = false;
 
+  /** Settles the open password prompt: the password, or null for a cancel. */
+  let passwordAnswer: ((password: string | null) => void) | null = null;
+  /** The document came with a password. Core cannot write it back with that
+      password, so a save would give an unprotected copy. */
+  let encrypted = false;
+  /** The password that decrypted the document, for a save that encrypts. */
+  let savePassword: string | null = null;
+
   /** Answers the frame owes: a request id to what resolves it. */
   const asks = new Map<number, (payload: string | null) => void>();
   let nextAsk = 1;
@@ -361,6 +374,7 @@ export function mountViewer({
   }
 
   function setBusy(message: string) {
+    passwordForm.hidden = true;
     spinner.hidden = false;
     idleIcon.hidden = true;
     actions.hidden = true;
@@ -369,6 +383,9 @@ export function mountViewer({
   }
 
   function setIdle(message: string, detail: string, isError = false) {
+    passwordForm.hidden = true;
+    uploadIcon.hidden = false;
+    lockIcon.hidden = true;
     spinner.hidden = true;
     idleIcon.hidden = false;
     actions.hidden = false;
@@ -395,16 +412,39 @@ export function mountViewer({
       setTimeout(finish, 50);
     });
 
+  /*
+    The panel asks for the password of an encrypted document. The promise
+    gives the password, or null if the visitor cancels or another document
+    replaces this one. `wrong` is true after a password that did not decrypt.
+  */
+  function askPassword(name: string, wrong: boolean): Promise<string | null> {
+    spinner.hidden = true;
+    idleIcon.hidden = false;
+    actions.hidden = true;
+    hint.hidden = false;
+    status.textContent = wrong ? 'That password is not correct' : `${name} is password-protected`;
+    hint.textContent = wrong
+      ? `Type the password of ${name} again.`
+      : 'Type its password. The document is decrypted on this device, and the password stays here.';
+    status.classList.toggle('text-red-600', wrong);
+    status.classList.toggle('dark:text-red-400', wrong);
+    uploadIcon.hidden = true;
+    lockIcon.hidden = false;
+    passwordForm.hidden = false;
+    passwordInput.value = '';
+    passwordInput.focus();
+    return new Promise((resolve) => {
+      passwordAnswer = resolve;
+    });
+  }
+
   function friendlyError(e: any, name: string) {
     switch (e?.name) {
       case 'UnsupportedFileType':
       case 'UnknownFileType':
         return [`${name} is not a format we can open`, 'Try an ODT, DOCX, XLSX, PPTX or PDF file.'];
       case 'FileEncrypted':
-        return [
-          `${name} is password-protected`,
-          'The app opens encrypted documents; this demo does not ask for passwords.',
-        ];
+        return [`${name} is password-protected`, 'Open it again, and type its password.'];
       case 'FileNotFound':
       case 'NoDocumentFile':
         return [`${name} could not be read`, 'The file looks empty or truncated.'];
@@ -663,7 +703,7 @@ export function mountViewer({
         if (!payload) throw new Error('The edits could not be read back.');
         if (JSON.parse(payload).ops.length) currentDoc.edit(payload);
         const recalc = sheet ? currentDoc.recalculate() : null;
-        saveBytes(currentDoc.save(), currentName);
+        saveBytes(encrypted ? currentDoc.save(savePassword ?? '') : currentDoc.save(), currentName);
         // The page and the file agree now: its log resets, undo starts over.
         send({ type: 'committed' });
         if (staleCount && recalc && Object.values(recalc).some((cells: any) => cells.length)) {
@@ -696,6 +736,11 @@ export function mountViewer({
   }
 
   function teardown() {
+    // A prompt that waits for a password belongs to the document that goes.
+    passwordAnswer?.(null);
+    passwordAnswer = null;
+    encrypted = false;
+    savePassword = null;
     for (const [, resolve] of asks) resolve(null);
     asks.clear();
     modeOn = false;
@@ -1033,15 +1078,39 @@ export function mountViewer({
       return;
     }
 
+    /*
+      Core decrypts ODF, Office (agile and standard encryption), the old
+      binary Office formats and iWork. A wrong password throws `WrongPassword`,
+      and the same document takes the next attempt. If the prompt gives null,
+      or `currentDoc` changed, another open or a cancel already did the
+      teardown, so this open stops and touches nothing.
+    */
+    let password: string | null = null;
     if (currentDoc.isPasswordEncrypted()) {
-      teardown();
-      setIdle(
-        `${name} is password-protected`,
-        'The app opens encrypted documents; this demo does not ask for passwords.',
-        true,
-      );
-      return;
+      const doc = currentDoc;
+      encrypted = true;
+      let wrong = false;
+      for (;;) {
+        password = await askPassword(name, wrong);
+        if (password === null || currentDoc !== doc) return;
+        setBusy(`Decrypting ${name}…`);
+        await nextFrame();
+        if (currentDoc !== doc) return;
+        try {
+          doc.decrypt(password);
+          break;
+        } catch (e: any) {
+          if (e?.name !== 'WrongPassword') {
+            const [msg, detail] = friendlyError(e, name);
+            teardown();
+            setIdle(msg, detail, true);
+            return;
+          }
+          wrong = true;
+        }
+      }
     }
+    savePassword = password;
 
     /*
       `capabilities()` answers for the format, the document for itself: a pdf
@@ -1050,7 +1119,12 @@ export function mountViewer({
       annotations. Asking in a net turns a question that throws into the same
       honest thing: no pen.
     */
-    canEdit = editableFormat && answers(() => currentDoc.isEditable() && currentDoc.isSavable());
+    // `isSavable(true)` asks for a save with the password. Without it, a save
+    // of an encrypted document gives a copy that anyone can open, so such a
+    // document is not editable here.
+    canEdit =
+      editableFormat &&
+      answers(() => currentDoc.isEditable() && currentDoc.isSavable(encrypted));
     canMark =
       markableFormat &&
       answers(
@@ -1164,6 +1238,25 @@ export function mountViewer({
       void openSafely(null, `Untitled.${btn.dataset.viewerBlank}`);
     });
   }
+
+  passwordForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const answer = passwordAnswer;
+    passwordAnswer = null;
+    const value = passwordInput.value;
+    passwordInput.value = '';
+    answer?.(value);
+  });
+
+  function cancelPassword() {
+    teardown();
+    setIdle(IDLE_TITLE, IDLE_HINT);
+  }
+
+  passwordCancelBtn.addEventListener('click', cancelPassword);
+  passwordInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') cancelPassword();
+  });
 
   resetBtn.addEventListener('click', () => {
     if (wouldDiscard()) return;
